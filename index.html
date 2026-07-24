@@ -228,6 +228,19 @@
     background:none; border:none; color:#B7C0CC; text-decoration:underline; font-size:11.5px; cursor:pointer; padding:0;
   }
 
+  .mappanel{
+    margin-top:12px; border-radius:14px; overflow:hidden; border:1px solid var(--border); box-shadow:var(--shadow);
+  }
+  #mapCanvas{ width:100%; height:320px; background:var(--bg); }
+  .map-pin{
+    display:flex; align-items:center; gap:4px; padding:3px 8px; border-radius:999px;
+    font-size:11px; font-weight:700; white-space:nowrap; box-shadow:0 1px 3px rgba(0,0,0,.25);
+    transform:translateY(-4px);
+  }
+  .map-pin.stop{background:var(--ink); color:#fff;}
+  .map-pin.start{background:var(--accent); color:#fff;}
+  .map-pin.end{background:var(--remote); color:#fff;}
+
   .summary{display:flex; gap:8px; margin-top:14px;}
   .summary .chip{
     flex:1; background:var(--surface); border:1px solid var(--border); border-radius:11px;
@@ -385,16 +398,20 @@
     </details>
 
     <details class="syncbox" id="routeBox">
-      <summary>🚗 동선 최적화</summary>
+      <summary>🚗 동선 최적화 · 🗺️ 지도</summary>
       <div class="syncbody">
         <p class="helptext">
-          출발지·도착지와 각 검사장소 주소를 좌표로 변환해 가까운 순서로 방문 지점을 재정렬합니다.
+          출발지·도착지와 각 검사장소 주소를 좌표로 변환해 가까운 순서로 방문 지점을 재정렬하고, 지도에 위치를 표시합니다.
           직선거리 기준 계산이라 실제 도로 상황과는 다소 차이가 있을 수 있습니다.<br>
-          카카오 <a href="https://developers.kakao.com/console/app" target="_blank" rel="noopener">디벨로퍼스</a>에서 앱 생성 후 <b>REST API 키</b>를 발급받아 아래에 입력해 주세요 (이 기기에만 저장됩니다).
+          같은 카카오 <a href="https://developers.kakao.com/console/app" target="_blank" rel="noopener">디벨로퍼스</a> 앱의 <b>REST API 키</b>(주소 변환용)와 <b>JavaScript 키</b>(지도 표시용) 둘 다 입력해 주세요 (이 기기에만 저장됩니다). JavaScript 키를 비워두면 동선 정렬만 되고 지도는 표시되지 않습니다.
         </p>
         <div class="fieldblock">
           <label for="kakaoKeyInput">카카오 REST API 키</label>
           <input type="password" id="kakaoKeyInput" placeholder="카카오 디벨로퍼스에서 발급받은 REST API 키" autocomplete="off">
+        </div>
+        <div class="fieldblock">
+          <label for="kakaoJsKeyInput">카카오 JavaScript 키 (지도 표시용, 선택)</label>
+          <input type="password" id="kakaoJsKeyInput" placeholder="같은 앱의 플랫폼 키 > JavaScript 키" autocomplete="off">
         </div>
 
         <div class="fieldblock">
@@ -428,6 +445,9 @@
   </div>
 
   <div class="routestrip" id="routeStrip" style="display:none;"></div>
+  <div class="mappanel" id="mapPanel" style="display:none;">
+    <div id="mapCanvas"></div>
+  </div>
 
   <div class="summary" id="summary" style="display:none;">
     <div class="chip onsite"><div class="num" id="cOnsite">0</div><div class="lbl">방문 지점</div></div>
@@ -477,6 +497,7 @@
   const dateSub = document.getElementById('dateSub');
 
   const kakaoKeyInput = document.getElementById('kakaoKeyInput');
+  const kakaoJsKeyInput = document.getElementById('kakaoJsKeyInput');
   const placesList = document.getElementById('placesList');
   const placeNameInput = document.getElementById('placeNameInput');
   const placeAddressInput = document.getElementById('placeAddressInput');
@@ -487,16 +508,19 @@
   const resetOrderBtn = document.getElementById('resetOrderBtn');
   const routeStatus = document.getElementById('routeStatus');
   const routeStrip = document.getElementById('routeStrip');
+  const mapPanel = document.getElementById('mapPanel');
 
   const LS_TOKEN = 'daily-route-gh-token';
   const LS_GIST = 'daily-route-gh-gist';
   const GIST_FILENAME = 'route-data.json';
   const LS_KAKAO_KEY = 'daily-route-kakao-key';
+  const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
   const LS_PLACES = 'daily-route-fixed-places';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
   let lastRouteMeta = null; // {start, end, failedCount}
+  let kakaoSdkPromise = null; // caches the loaded Maps SDK so we only inject the script once
 
   // ---------- local device settings ----------
   function loadDeviceConfig(){
@@ -504,6 +528,7 @@
       tokenInput.value = localStorage.getItem(LS_TOKEN) || '';
       gistInput.value = localStorage.getItem(LS_GIST) || '';
       kakaoKeyInput.value = localStorage.getItem(LS_KAKAO_KEY) || '';
+      kakaoJsKeyInput.value = localStorage.getItem(LS_KAKAO_JS_KEY) || '';
     }catch(e){ /* localStorage unavailable, sync tab still usable manually */ }
   }
   function saveDeviceConfig(token, gistId){
@@ -645,6 +670,7 @@
         lastWorkbookRows = data.rows;
         lastOptimizedOrder = null;
         lastRouteMeta = null;
+        mapPanel.style.display = 'none';
         setSyncStatus('☁️ ' + formatRelative(data.uploadedAt) + ' 동기화됨', 'ok');
         return true;
       }else{
@@ -783,10 +809,54 @@
     return (g.customer||'').toUpperCase() + '||' + ((g.address||g.location||'')).toUpperCase();
   }
 
+  // ---------- embedded map (Kakao Maps JS SDK) ----------
+  function loadKakaoSdk(jsKey){
+    if(kakaoSdkPromise) return kakaoSdkPromise;
+    kakaoSdkPromise = new Promise((resolve, reject)=>{
+      const script = document.createElement('script');
+      script.src = 'https://dapi.kakao.com/v2/maps/sdk.js?appkey=' + encodeURIComponent(jsKey) + '&autoload=false';
+      script.onload = function(){
+        try{
+          window.kakao.maps.load(function(){ resolve(window.kakao); });
+        }catch(e){ reject(e); }
+      };
+      script.onerror = function(){ reject(new Error('지도 스크립트를 불러오지 못했습니다')); };
+      document.head.appendChild(script);
+    });
+    return kakaoSdkPromise;
+  }
+
+  function renderMap(nodes){
+    if(!nodes.length) return;
+    loadKakaoSdk(kakaoJsKeyInput.value.trim()).then(function(kakao){
+      mapPanel.style.display = '';
+      const canvas = document.getElementById('mapCanvas');
+      const center = new kakao.maps.LatLng(nodes[0].lat, nodes[0].lng);
+      const map = new kakao.maps.Map(canvas, {center, level: 8});
+      const bounds = new kakao.maps.LatLngBounds();
+
+      nodes.forEach(n=>{
+        const pos = new kakao.maps.LatLng(n.lat, n.lng);
+        bounds.extend(pos);
+        new kakao.maps.Marker({position: pos, map});
+        const label = n.kind === 'stop' ? String(n.order) : (n.kind === 'start' ? '출발' : '도착');
+        const content = `<div class="map-pin ${n.kind}">${esc(label)} ${esc(n.name)}</div>`;
+        const overlay = new kakao.maps.CustomOverlay({position: pos, content, yAnchor: 2.1});
+        overlay.setMap(map);
+      });
+
+      map.setBounds(bounds);
+    }).catch(function(e){
+      setRouteStatus('지도를 불러오지 못했습니다: ' + e.message, 'warn');
+    });
+  }
+
   optimizeBtn.addEventListener('click', async function(){
     const key = kakaoKeyInput.value.trim();
     if(key) localStorage.setItem(LS_KAKAO_KEY, key);
     if(!key){ setRouteStatus('먼저 카카오 REST API 키를 입력해 주세요', 'warn'); return; }
+    const jsKey = kakaoJsKeyInput.value.trim();
+    if(jsKey) localStorage.setItem(LS_KAKAO_JS_KEY, jsKey);
 
     const places = loadPlaces();
     const startPlace = places.find(p=>p.id===startSelect.value);
@@ -842,15 +912,28 @@
       failedCount: failed.length, failedNames: failed.map(f=>f.group.customer)
     };
     setRouteStatus(
-      '동선 정렬 완료' + (failed.length ? ` · 주소 인식 실패 ${failed.length}건은 마지막에 배치됨 (${failed.map(f=>f.group.customer).join(', ')})` : ''),
+      '동선 정렬 완료' + (failed.length ? ` · 주소 인식 실패 ${failed.length}건은 마지막에 배치됨 (${failed.map(f=>f.group.customer).join(', ')})` : '')
+      + (jsKey ? '' : ' · 지도를 보려면 JavaScript 키도 입력해 주세요'),
       'ok'
     );
     render();
+
+    if(jsKey){
+      const coordByGroup = new Map(coords.map(c => [c.group, c.coord]));
+      const mapNodes = [{name: startPlace.name, lat: startCoord.lat, lng: startCoord.lng, kind: 'start'}];
+      ordered.forEach((g, i)=>{
+        const c = coordByGroup.get(g);
+        if(c) mapNodes.push({name: g.customer, lat: c.lat, lng: c.lng, kind: 'stop', order: i+1});
+      });
+      if(endCoord) mapNodes.push({name: endPlace.name, lat: endCoord.lat, lng: endCoord.lng, kind: 'end'});
+      renderMap(mapNodes);
+    }
   });
 
   resetOrderBtn.addEventListener('click', function(){
     lastOptimizedOrder = null;
     lastRouteMeta = null;
+    mapPanel.style.display = 'none';
     setRouteStatus('원래 순서로 되돌렸습니다');
     render();
   });
@@ -1090,7 +1173,7 @@
       routeStrip.style.display = '';
       const stripResetBtn = document.getElementById('stripResetBtn');
       if(stripResetBtn) stripResetBtn.addEventListener('click', function(){
-        lastOptimizedOrder = null; lastRouteMeta = null; setRouteStatus('원래 순서로 되돌렸습니다'); render();
+        lastOptimizedOrder = null; lastRouteMeta = null; mapPanel.style.display = 'none'; setRouteStatus('원래 순서로 되돌렸습니다'); render();
       });
     }else{
       routeStrip.style.display = 'none';
@@ -1122,6 +1205,7 @@
         lastWorkbookRows = rows;
         lastOptimizedOrder = null;
         lastRouteMeta = null;
+        mapPanel.style.display = 'none';
         fileMeta.textContent = file.name;
         fileMetaRow.style.display = '';
         render();
@@ -1149,12 +1233,14 @@
   codeInput.addEventListener('input', function(){
     lastOptimizedOrder = null;
     lastRouteMeta = null;
+    mapPanel.style.display = 'none';
     render();
   });
   resetBtn.addEventListener('click', function(){
     lastWorkbookRows = null;
     lastOptimizedOrder = null;
     lastRouteMeta = null;
+    mapPanel.style.display = 'none';
     fileInput.value = '';
     fileMetaRow.style.display = 'none';
     dateTitle.textContent = '오늘의 검사 일정';
