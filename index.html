@@ -595,54 +595,77 @@
   }
   function clearError(){ errorState.innerHTML = ''; }
 
-  function findHeaderRow(rows){
-    for(let i=0;i<Math.min(rows.length,15);i++){
-      const row = rows[i] || [];
-      const norm = row.map(c => cleanCell(c).toUpperCase());
-      if(norm.includes('SURVEYOR') && norm.includes('LOCATION')) return i;
+  function normHeader(s){
+    return cleanCell(s).replace(/\s+/g,' ').toUpperCase();
+  }
+  function findCol(header, names){
+    for(const n of names){
+      const i = header.indexOf(n);
+      if(i !== -1) return i;
     }
     return -1;
   }
+  const COL_SYNONYMS = {
+    id: ['ID'],
+    project: ['PROJECT'],
+    customer: ['CUSTOMER', 'SHIP NAME'],
+    location: ['LOCATION'],
+    address: ['ADDRESS'],
+    phone: ['PHONE CONTACT'],
+    asset: ['ASSET CATEGORY', 'SURVEY ITEM'],
+    intended: ['INTENDED FOR'],
+    details: ['REQUESTDETAILS', 'REMARK'],
+    surveyor: ['SURVEYOR'],
+  };
 
+  // The workbook can contain more than one stacked "WORK BOOK" table per day,
+  // and different tables can use different column names (e.g. an ES-survey
+  // block uses SHIP NAME / SURVEY ITEM / REMARK instead of CUSTOMER / ASSET
+  // CATEGORY / REQUESTDETAILS). We re-detect the header whenever one appears,
+  // instead of assuming a single fixed header for the whole sheet.
   function parseWorkbook(rows){
-    const headerIdx = findHeaderRow(rows);
-    if(headerIdx === -1){
-      throw new Error('시트에서 SURVEYOR / LOCATION 헤더를 찾지 못했습니다. 원본 WORK BOOK 형식인지 확인해 주세요.');
-    }
-    const header = rows[headerIdx].map(c => cleanCell(c).toUpperCase());
-    const col = name => header.indexOf(name);
-    const idx = {
-      id: col('ID'), project: col('PROJECT'), customer: col('CUSTOMER'),
-      location: col('LOCATION'), address: col('ADDRESS'), phone: col('PHONE CONTACT'),
-      asset: col('ASSET CATEGORY'), intended: col('INTENDED FOR'),
-      details: col('REQUESTDETAILS'), surveyor: col('SURVEYOR'),
-    };
-    if(idx.surveyor === -1) throw new Error('SURVEYOR 열을 찾지 못했습니다.');
-
+    let idx = null;
     let dayText = '', dateText = '';
-    for(let i=0;i<headerIdx;i++){
-      (rows[i]||[]).forEach(c=>{
+    const out = [];
+
+    for(let r=0; r<rows.length; r++){
+      const row = rows[r] || [];
+
+      row.forEach(c=>{
         const s = cleanCell(c);
         const dm = s.match(/Day\s*:\s*(\w+)/i);
         if(dm) dayText = dm[1];
         const dt = s.match(/Date\s*:\s*([\d.\-\/]+)/i);
         if(dt) dateText = dt[1];
       });
+
+      const norm = row.map(normHeader);
+      if(norm.includes('SURVEYOR') && norm.includes('LOCATION')){
+        idx = {};
+        Object.keys(COL_SYNONYMS).forEach(key=>{ idx[key] = findCol(norm, COL_SYNONYMS[key]); });
+        continue; // this row is a header, not data
+      }
+      if(!idx) continue; // haven't seen a header yet (or malformed sheet)
+
+      const survRaw = idx.surveyor > -1 ? cleanCell(row[idx.surveyor]) : '';
+      if(!/^[A-Za-z]{2,6}$/.test(survRaw)) continue; // filters blank rows & footer summary text
+
+      out.push({
+        id: idx.id>-1 ? cleanCell(row[idx.id]) : '',
+        project: idx.project>-1 ? cleanCell(row[idx.project]) : '',
+        customer: idx.customer>-1 ? cleanCell(row[idx.customer]) : '',
+        location: idx.location>-1 ? cleanCell(row[idx.location]) : '',
+        address: idx.address>-1 ? cleanCell(row[idx.address]) : '',
+        phone: idx.phone>-1 ? cleanCell(row[idx.phone]) : '',
+        asset: idx.asset>-1 ? cleanCell(row[idx.asset]) : '',
+        intended: idx.intended>-1 ? cleanCell(row[idx.intended]) : '',
+        details: idx.details>-1 ? cleanCell(row[idx.details]) : '',
+        surveyor: survRaw,
+      });
     }
 
-    const out = [];
-    for(let r=headerIdx+1; r<rows.length; r++){
-      const row = rows[r];
-      if(!row) continue;
-      const idVal = row[idx.id];
-      if(idVal==null || cleanCell(idVal)==='') continue;
-      if(isNaN(Number(idVal))) continue;
-      out.push({
-        id: cleanCell(idVal), project: cleanCell(row[idx.project]), customer: cleanCell(row[idx.customer]),
-        location: cleanCell(row[idx.location]), address: cleanCell(row[idx.address]), phone: cleanCell(row[idx.phone]),
-        asset: cleanCell(row[idx.asset]), intended: cleanCell(row[idx.intended]),
-        details: cleanCell(row[idx.details]), surveyor: cleanCell(row[idx.surveyor]),
-      });
+    if(!idx){
+      throw new Error('시트에서 SURVEYOR / LOCATION 헤더를 찾지 못했습니다. 원본 WORK BOOK 형식인지 확인해 주세요.');
     }
     return {items: out, dayText, dateText};
   }
@@ -706,7 +729,7 @@
         <div class="item">
           <div class="item-top">
             <span class="item-asset">${esc(it.asset || '(품목 미기재)')}</span>
-            <span class="item-id">#${esc(it.id)}</span>
+            <span class="item-id">#${esc(it.id || '—')}</span>
           </div>
           ${intendedLine}
           ${phoneLine}
