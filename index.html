@@ -278,11 +278,12 @@
   .tag.owner{background:var(--owner-soft); color:var(--owner);}
   .tag.count{background:var(--bg); color:var(--ink-soft);}
 
-  .actionrow{display:flex; gap:8px; padding:0 16px 14px;}
+  .actionrow{display:flex; gap:8px; padding:0 16px 14px; min-width:0;}
   .actionbtn{
-    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
-    padding:10px 10px; border-radius:10px; font-size:13px; font-weight:600;
+    flex:1 1 0; min-width:0; display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:10px 8px; border-radius:10px; font-size:12.5px; font-weight:600; text-align:center;
     text-decoration:none; border:1.5px solid var(--border); color:var(--ink); background:var(--bg);
+    white-space:normal; line-height:1.25; overflow-wrap:anywhere;
   }
   .actionbtn.map{border-color:#F3C7A2; background:var(--accent-soft); color:#B8480A;}
   .actionbtn.call{border-color:#c9d3de;}
@@ -721,19 +722,28 @@
     routeStatus.style.color = kind === 'warn' ? 'var(--danger)' : (kind === 'ok' ? 'var(--ok)' : '');
   }
 
-  async function geocodeAddress(key, query){
-    if(!query) return null;
-    try{
-      let res = await fetch('https://dapi.kakao.com/v2/local/search/address.json?query=' + encodeURIComponent(query), {
-        headers: {Authorization: 'KakaoAK ' + key}
-      });
-      if(res.ok){
-        const data = await res.json();
-        if(data.documents && data.documents.length){
-          return {lat: parseFloat(data.documents[0].y), lng: parseFloat(data.documents[0].x)};
-        }
+  // Real workbook ADDRESS cells are inconsistently formatted: sometimes a clean
+  // address, sometimes "회사명 (주소)" or "주소 (건물명)". We try several
+  // derived candidates rather than assuming one fixed layout.
+  function buildAddressCandidates(raw){
+    const s = cleanCell(raw);
+    if(!s) return [];
+    const candidates = [s];
+    const parenMatches = [...s.matchAll(/\(([^()]+)\)/g)];
+    parenMatches.forEach(m=>{
+      const inner = m[1].trim();
+      if(inner && (/[가-힣](로|길|동|읍|면|리|구|시|도)\b/.test(inner) || /\d/.test(inner))){
+        candidates.push(inner);
       }
-      res = await fetch('https://dapi.kakao.com/v2/local/search/keyword.json?query=' + encodeURIComponent(query), {
+    });
+    const stripped = s.replace(/\([^()]*\)/g, ' ').replace(/\s+/g,' ').trim();
+    if(stripped && stripped !== s) candidates.push(stripped);
+    return [...new Set(candidates)].filter(Boolean);
+  }
+
+  async function tryGeocodeQuery(key, query, endpoint){
+    try{
+      const res = await fetch('https://dapi.kakao.com/v2/local/search/' + endpoint + '.json?query=' + encodeURIComponent(query), {
         headers: {Authorization: 'KakaoAK ' + key}
       });
       if(res.ok){
@@ -743,6 +753,20 @@
         }
       }
     }catch(e){ /* network/CORS failure -> treat as not found */ }
+    return null;
+  }
+
+  async function geocodeAddress(key, query){
+    const candidates = buildAddressCandidates(query);
+    if(candidates.length === 0) return null;
+    for(const q of candidates){
+      const hit = await tryGeocodeQuery(key, q, 'address');
+      if(hit) return hit;
+    }
+    for(const q of candidates){
+      const hit = await tryGeocodeQuery(key, q, 'keyword');
+      if(hit) return hit;
+    }
     return null;
   }
 
