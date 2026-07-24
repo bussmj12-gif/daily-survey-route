@@ -38,7 +38,6 @@
   }
   .wrap{max-width:640px;margin:0 auto;padding:0 16px;}
 
-  /* ===== Header / stamp banner ===== */
   header{
     background:var(--ink);
     color:#fff;
@@ -81,7 +80,6 @@
     border-radius:50%;
   }
 
-  /* ===== Control bar ===== */
   .controls{
     background:var(--surface);
     border:1px solid var(--border);
@@ -102,19 +100,19 @@
     letter-spacing:.06em;
     white-space:nowrap;
   }
-  input[type=text]{
+  input[type=text], input[type=password]{
     font-family:'Space Mono',monospace;
-    font-size:14px;
+    font-size:13.5px;
     font-weight:700;
-    letter-spacing:.05em;
+    letter-spacing:.03em;
     border:1.5px solid var(--border);
     border-radius:9px;
     padding:9px 10px;
-    width:84px;
-    text-transform:uppercase;
     color:var(--ink);
+    width:100%;
   }
-  input[type=text]:focus{outline:none;border-color:var(--accent);}
+  input#codeInput{width:84px; text-transform:uppercase;}
+  input:focus{outline:none;border-color:var(--accent);}
   .filebtn{
     flex:1;
     position:relative;
@@ -148,6 +146,7 @@
     cursor:pointer;
     background:none;border:none;padding:0;
   }
+
   .syncrow{
     display:flex;
     align-items:center;
@@ -157,205 +156,130 @@
     padding-top:10px;
     border-top:1px dashed var(--border);
   }
-  .syncrow #syncStatus{
-    font-size:11.5px;
-    color:var(--ink-soft);
-  }
+  .syncrow #syncStatus{font-size:11.5px; color:var(--ink-soft);}
   .syncrow #syncStatus.ok{color:var(--ok);}
   .syncrow #syncStatus.warn{color:var(--danger);}
   .synclink{
-    font-size:12px;
-    font-weight:600;
-    color:var(--remote);
-    background:none;
-    border:none;
-    cursor:pointer;
-    padding:0;
-    white-space:nowrap;
+    font-size:12px; font-weight:600; color:var(--remote);
+    background:none; border:none; cursor:pointer; padding:0; white-space:nowrap;
   }
 
-  /* ===== Summary strip ===== */
-  .summary{
-    display:flex;
-    gap:8px;
-    margin-top:14px;
+  details.syncbox{
+    margin-top:10px;
+    border-top:1px dashed var(--border);
+    padding-top:10px;
   }
-  .summary .chip{
-    flex:1;
-    background:var(--surface);
-    border:1px solid var(--border);
-    border-radius:11px;
-    padding:10px 8px;
-    text-align:center;
-  }
-  .summary .chip .num{
-    font-family:'Space Grotesk',sans-serif;
-    font-size:20px;
-    font-weight:700;
-    line-height:1;
-  }
-  .summary .chip .lbl{
-    font-size:10.5px;
+  details.syncbox summary{
+    cursor:pointer;
+    font-size:12px;
+    font-weight:600;
     color:var(--ink-soft);
-    margin-top:4px;
-    letter-spacing:.02em;
+    list-style:none;
   }
+  details.syncbox summary::-webkit-details-marker{display:none;}
+  details.syncbox summary::before{content:"⚙ "; }
+  details.syncbox .syncbody{margin-top:12px; display:flex; flex-direction:column; gap:10px;}
+  .fieldblock label{
+    display:block; font-size:11px; font-weight:600; color:var(--ink-soft);
+    margin-bottom:5px;
+  }
+  .helptext{font-size:11.5px; color:var(--ink-faint); line-height:1.6;}
+  .btnrow{display:flex; gap:8px; flex-wrap:wrap;}
+  .smallbtn{
+    font-size:12.5px; font-weight:700; padding:8px 12px; border-radius:8px;
+    border:1.5px solid var(--border); background:var(--bg); color:var(--ink); cursor:pointer;
+  }
+  .smallbtn.primary{background:var(--accent); border-color:var(--accent); color:#fff;}
+  .pastebox{display:flex; gap:8px;}
+  .pastebox input{flex:1;}
+  .qrwrap{display:flex; align-items:center; gap:12px; margin-top:4px;}
+  .qrwrap img{border-radius:8px; border:1px solid var(--border);}
+  .codeshow{
+    font-family:'Space Mono',monospace; font-size:11px; word-break:break-all;
+    background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px;
+    color:var(--ink-soft);
+  }
+
+  .summary{display:flex; gap:8px; margin-top:14px;}
+  .summary .chip{
+    flex:1; background:var(--surface); border:1px solid var(--border); border-radius:11px;
+    padding:10px 8px; text-align:center;
+  }
+  .summary .chip .num{font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; line-height:1;}
+  .summary .chip .lbl{font-size:10.5px; color:var(--ink-soft); margin-top:4px; letter-spacing:.02em;}
   .summary .chip.onsite .num{color:var(--accent);}
   .summary .chip.remote .num{color:var(--remote);}
   .summary .chip.owner .num{color:var(--owner);}
 
-  /* ===== Empty state ===== */
   .empty{
-    background:var(--surface);
-    border:1px dashed var(--border);
-    border-radius:var(--radius);
-    padding:36px 20px;
-    text-align:center;
-    margin-top:18px;
+    background:var(--surface); border:1px dashed var(--border); border-radius:var(--radius);
+    padding:36px 20px; text-align:center; margin-top:18px;
   }
   .empty .icon{font-size:30px; margin-bottom:10px;}
   .empty h3{font-family:'Space Grotesk',sans-serif; margin:0 0 6px; font-size:16px;}
   .empty p{font-size:13px; color:var(--ink-soft); margin:0; line-height:1.6;}
   .errorbar{
-    margin-top:14px;
-    background:#FDEDE9;
-    border:1px solid #F1C4B8;
-    color:var(--danger);
-    border-radius:10px;
-    padding:12px 14px;
-    font-size:13px;
-    line-height:1.5;
+    margin-top:14px; background:#FDEDE9; border:1px solid #F1C4B8; color:var(--danger);
+    border-radius:10px; padding:12px 14px; font-size:13px; line-height:1.5;
   }
 
-  /* ===== Stops list ===== */
   .stops{margin-top:18px; display:flex; flex-direction:column; gap:12px;}
   .stop{
-    background:var(--surface);
-    border:1px solid var(--border);
-    border-radius:var(--radius);
-    box-shadow:var(--shadow);
-    overflow:hidden;
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    box-shadow:var(--shadow); overflow:hidden;
   }
-  .stop-head{
-    display:flex;
-    gap:12px;
-    padding:14px 16px 12px;
-    align-items:flex-start;
-  }
+  .stop-head{display:flex; gap:12px; padding:14px 16px 12px; align-items:flex-start;}
   .stampnum{
-    flex:0 0 auto;
-    width:34px;height:34px;
-    border-radius:50%;
-    border:2px dashed var(--ink-faint);
-    display:flex; align-items:center; justify-content:center;
-    font-family:'Space Mono',monospace;
-    font-weight:700;
-    font-size:13px;
-    color:var(--ink-soft);
+    flex:0 0 auto; width:34px;height:34px; border-radius:50%;
+    border:2px dashed var(--ink-faint); display:flex; align-items:center; justify-content:center;
+    font-family:'Space Mono',monospace; font-weight:700; font-size:13px; color:var(--ink-soft);
   }
   .stop.is-remote .stampnum{border-color:var(--remote); color:var(--remote);}
   .stop-titles{flex:1; min-width:0;}
   .stop-titles .customer{
-    font-family:'Space Grotesk',sans-serif;
-    font-size:16.5px;
-    font-weight:700;
-    color:var(--ink);
-    margin:0 0 3px;
-    line-height:1.25;
+    font-family:'Space Grotesk',sans-serif; font-size:16.5px; font-weight:700; color:var(--ink);
+    margin:0 0 3px; line-height:1.25;
   }
   .tagrow{display:flex; flex-wrap:wrap; gap:6px; align-items:center;}
   .tag{
-    font-size:10.5px;
-    font-weight:700;
-    letter-spacing:.03em;
-    padding:3px 8px;
-    border-radius:999px;
-    text-transform:uppercase;
+    font-size:10.5px; font-weight:700; letter-spacing:.03em; padding:3px 8px;
+    border-radius:999px; text-transform:uppercase;
   }
   .tag.onsite{background:var(--accent-soft); color:var(--accent);}
   .tag.remote{background:var(--remote-soft); color:var(--remote);}
   .tag.owner{background:var(--owner-soft); color:var(--owner);}
   .tag.count{background:var(--bg); color:var(--ink-soft);}
 
-  .actionrow{
-    display:flex; gap:8px;
-    padding:0 16px 14px;
-  }
+  .actionrow{display:flex; gap:8px; padding:0 16px 14px;}
   .actionbtn{
-    flex:1;
-    display:flex; align-items:center; justify-content:center; gap:6px;
-    padding:10px 10px;
-    border-radius:10px;
-    font-size:13px;
-    font-weight:600;
-    text-decoration:none;
-    border:1.5px solid var(--border);
-    color:var(--ink);
-    background:var(--bg);
+    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:10px 10px; border-radius:10px; font-size:13px; font-weight:600;
+    text-decoration:none; border:1.5px solid var(--border); color:var(--ink); background:var(--bg);
   }
   .actionbtn.map{border-color:#F3C7A2; background:var(--accent-soft); color:#B8480A;}
   .actionbtn.call{border-color:#c9d3de;}
-  .actionbtn svg{width:15px;height:15px;flex:0 0 auto;}
 
-  .items{
-    border-top:1px solid var(--border);
-  }
-  .item{
-    padding:12px 16px;
-    display:flex; flex-direction:column; gap:5px;
-  }
+  .items{border-top:1px solid var(--border);}
+  .item{padding:12px 16px; display:flex; flex-direction:column; gap:5px;}
   .item + .item{border-top:1px dashed var(--border);}
-  .item-top{
-    display:flex; justify-content:space-between; align-items:baseline; gap:8px;
-  }
-  .item-id{
-    font-family:'Space Mono',monospace;
-    font-size:10.5px;
-    color:var(--ink-faint);
-  }
-  .item-asset{
-    font-size:13.5px;
-    font-weight:600;
-    color:var(--ink);
-    flex:1;
-  }
-  .item-intended{
-    font-size:12.5px;
-    color:var(--ink-soft);
-    white-space:pre-line;
-  }
-  .item-phone-row{
-    display:flex; align-items:center; gap:8px;
-    margin-top:2px;
-  }
+  .item-top{display:flex; justify-content:space-between; align-items:baseline; gap:8px;}
+  .item-id{font-family:'Space Mono',monospace; font-size:10.5px; color:var(--ink-faint);}
+  .item-asset{font-size:13.5px; font-weight:600; color:var(--ink); flex:1;}
+  .item-intended{font-size:12.5px; color:var(--ink-soft); white-space:pre-line;}
+  .item-phone-row{display:flex; align-items:center; gap:8px; margin-top:2px;}
   .item-phone-row a{
-    font-family:'Space Mono',monospace;
-    font-size:12.5px;
-    font-weight:700;
-    color:var(--ok);
-    text-decoration:none;
-    display:flex; align-items:center; gap:5px;
+    font-family:'Space Mono',monospace; font-size:12.5px; font-weight:700; color:var(--ok);
+    text-decoration:none; display:flex; align-items:center; gap:5px;
   }
   .memo{
-    margin-top:4px;
-    background:#FFFBEF;
-    border:1px solid #F3E4B8;
-    border-radius:8px;
-    padding:8px 10px;
-    font-size:12.5px;
-    line-height:1.55;
-    color:#7A5C10;
-    white-space:pre-line;
+    margin-top:4px; background:#FFFBEF; border:1px solid #F3E4B8; border-radius:8px;
+    padding:8px 10px; font-size:12.5px; line-height:1.55; color:#7A5C10; white-space:pre-line;
   }
   .memo b{font-weight:700;}
 
   footer{
-    text-align:center;
-    font-size:11px;
-    color:var(--ink-faint);
-    margin-top:26px;
-    padding:0 24px;
-    line-height:1.6;
+    text-align:center; font-size:11px; color:var(--ink-faint); margin-top:26px;
+    padding:0 24px; line-height:1.6;
   }
 </style>
 </head>
@@ -384,10 +308,52 @@
       <span class="filename" id="fileMeta"></span>
       <button class="resetlink" id="resetBtn">초기화</button>
     </div>
-    <div class="syncrow" id="syncRow">
-      <span id="syncStatus">☁️ 동기화 확인 중…</span>
+
+    <div class="syncrow">
+      <span id="syncStatus">동기화 미설정</span>
       <button class="synclink" id="syncBtn">↻ 새로고침</button>
     </div>
+
+    <details class="syncbox" id="syncBox">
+      <summary>휴대폰과 동기화 설정</summary>
+      <div class="syncbody">
+        <p class="helptext">
+          내 GitHub 계정의 비공개 Gist 하나에 오늘 일정을 저장해서 컴퓨터·휴대폰이 같은 데이터를 보게 합니다.
+          최초 1회만 설정하면 됩니다.<br>
+          1) <b>컴퓨터</b>에서: <a href="https://github.com/settings/tokens/new?scopes=gist&description=Daily%20Route%20Sync" target="_blank" rel="noopener">GitHub 토큰 발급 페이지</a>에서 <b>gist</b> 권한만 체크하고 토큰을 발급 → 아래에 붙여넣고 "저장소 만들기" 클릭<br>
+          2) 아래 나오는 <b>동기화 코드</b>를 QR로 찍거나 복사해서 <b>휴대폰</b>에서 붙여넣기 → 적용
+        </p>
+        <div class="fieldblock">
+          <label for="tokenInput">GitHub 토큰 (gist 권한)</label>
+          <input type="password" id="tokenInput" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off">
+        </div>
+        <div class="fieldblock">
+          <label for="gistInput">Gist ID</label>
+          <input type="text" id="gistInput" placeholder="컴퓨터에서 최초 생성 시 자동 입력됨">
+        </div>
+        <div class="btnrow">
+          <button class="smallbtn primary" id="createGistBtn">저장소 만들기 (최초 1회)</button>
+          <button class="smallbtn" id="saveSyncBtn">이 값으로 저장</button>
+        </div>
+        <div id="syncCodeArea" style="display:none;">
+          <div class="fieldblock">
+            <label>동기화 코드 (휴대폰에 복사해서 붙여넣으세요)</label>
+            <div class="codeshow" id="syncCodeText"></div>
+          </div>
+          <div class="qrwrap">
+            <img id="syncQr" width="140" height="140" alt="동기화 코드 QR">
+            <span class="helptext">휴대폰 카메라로 QR을 찍어 코드를 복사한 뒤, 아래 붙여넣기 칸에 넣어주세요.</span>
+          </div>
+        </div>
+        <div class="fieldblock">
+          <label>동기화 코드 붙여넣기 (휴대폰에서 사용)</label>
+          <div class="pastebox">
+            <input type="text" id="pasteInput" placeholder="컴퓨터에서 복사한 동기화 코드 붙여넣기">
+            <button class="smallbtn primary" id="applyPasteBtn">적용</button>
+          </div>
+        </div>
+      </div>
+    </details>
   </div>
 
   <div class="summary" id="summary" style="display:none;">
@@ -408,7 +374,7 @@
 
   <footer>
     검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결, 앱에서 길찾기 버튼을 한 번 더 눌러주세요) · 전화번호를 누르면 바로 통화가 걸립니다.<br>
-    컴퓨터에서 엑셀을 업로드하면 같은 계정의 휴대폰 화면에도 자동으로 동기화됩니다. 휴대폰에서는 업로드 대신 위의 새로고침만 눌러주세요.
+    동기화 데이터는 내 GitHub 비공개 Gist에만 저장되며, 발급한 토큰은 이 브라우저에만 보관됩니다.
   </footer>
 </div>
 
@@ -421,16 +387,49 @@
   const resetBtn = document.getElementById('resetBtn');
   const syncStatus = document.getElementById('syncStatus');
   const syncBtn = document.getElementById('syncBtn');
+  const tokenInput = document.getElementById('tokenInput');
+  const gistInput = document.getElementById('gistInput');
+  const createGistBtn = document.getElementById('createGistBtn');
+  const saveSyncBtn = document.getElementById('saveSyncBtn');
+  const pasteInput = document.getElementById('pasteInput');
+  const applyPasteBtn = document.getElementById('applyPasteBtn');
+  const syncCodeArea = document.getElementById('syncCodeArea');
+  const syncCodeText = document.getElementById('syncCodeText');
+  const syncQr = document.getElementById('syncQr');
   const emptyState = document.getElementById('emptyState');
   const errorState = document.getElementById('errorState');
   const stopsList = document.getElementById('stopsList');
   const summary = document.getElementById('summary');
-  const STORAGE_KEY = 'daily-route-latest';
   const dateTitle = document.getElementById('dateTitle');
   const dateSub = document.getElementById('dateSub');
 
-  let lastWorkbookRows = null; // cached parsed rows, so changing the code re-filters without re-upload
-  let storageAvailable = typeof window.storage !== 'undefined';
+  const LS_TOKEN = 'daily-route-gh-token';
+  const LS_GIST = 'daily-route-gh-gist';
+  const GIST_FILENAME = 'route-data.json';
+
+  let lastWorkbookRows = null;
+
+  // ---------- local device settings ----------
+  function loadDeviceConfig(){
+    try{
+      tokenInput.value = localStorage.getItem(LS_TOKEN) || '';
+      gistInput.value = localStorage.getItem(LS_GIST) || '';
+    }catch(e){ /* localStorage unavailable, sync tab still usable manually */ }
+  }
+  function saveDeviceConfig(token, gistId){
+    try{
+      localStorage.setItem(LS_TOKEN, token || '');
+      localStorage.setItem(LS_GIST, gistId || '');
+    }catch(e){}
+  }
+  function getDeviceConfig(){
+    return {token: tokenInput.value.trim(), gistId: gistInput.value.trim()};
+  }
+
+  function setSyncStatus(text, kind){
+    syncStatus.textContent = text;
+    syncStatus.className = kind || '';
+  }
 
   function formatRelative(iso){
     if(!iso) return '';
@@ -444,68 +443,153 @@
     return new Date(iso).toLocaleString('ko-KR', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'});
   }
 
-  async function saveToStorage(rows){
-    if(!storageAvailable) return;
-    try{
-      const payload = JSON.stringify({rows, uploadedAt: new Date().toISOString()});
-      await window.storage.set(STORAGE_KEY, payload, false);
-      syncStatus.textContent = '☁️ 방금 동기화됨';
-      syncStatus.className = 'ok';
-    }catch(e){
-      // non-fatal: uploader still sees their own data locally even if sync fails
-      syncStatus.textContent = '☁️ 동기화 실패 (' + (e.message||'오류') + ')';
-      syncStatus.className = 'warn';
+  // ---------- GitHub Gist sync ----------
+  async function createGist(token){
+    const res = await fetch('https://api.github.com/gists', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'token '+token},
+      body: JSON.stringify({
+        description: '오늘의 검사일정 - 동기화 데이터 (자동 생성)',
+        public: false,
+        files: { [GIST_FILENAME]: { content: JSON.stringify({rows:null, uploadedAt:null}) } }
+      })
+    });
+    if(!res.ok){
+      const t = await res.text().catch(()=> '');
+      throw new Error('저장소 생성 실패 (' + res.status + ') ' + t.slice(0,120));
     }
+    const data = await res.json();
+    return data.id;
   }
 
-  async function loadFromStorage(){
-    if(!storageAvailable){
-      syncStatus.textContent = '이 환경에서는 기기 간 동기화를 지원하지 않습니다';
-      syncBtn.style.display = 'none';
+  async function pushGist(token, gistId, rows){
+    const res = await fetch('https://api.github.com/gists/' + gistId, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json','Authorization':'token '+token},
+      body: JSON.stringify({
+        files: { [GIST_FILENAME]: { content: JSON.stringify({rows, uploadedAt: new Date().toISOString()}) } }
+      })
+    });
+    if(!res.ok){
+      const t = await res.text().catch(()=> '');
+      throw new Error('업로드 실패 (' + res.status + ') ' + t.slice(0,120));
+    }
+    return res.json();
+  }
+
+  async function pullGist(token, gistId){
+    const headers = {'Accept':'application/vnd.github+json'};
+    if(token) headers['Authorization'] = 'token ' + token;
+    const res = await fetch('https://api.github.com/gists/' + gistId, {headers});
+    if(!res.ok){
+      throw new Error('불러오기 실패 (' + res.status + ')');
+    }
+    const data = await res.json();
+    const file = data.files && data.files[GIST_FILENAME];
+    if(!file) throw new Error('데이터 파일을 찾을 수 없습니다');
+    return JSON.parse(file.content);
+  }
+
+  function showSyncCode(token, gistId){
+    const code = token + '::' + gistId;
+    syncCodeText.textContent = code;
+    syncQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(code);
+    syncCodeArea.style.display = '';
+  }
+
+  createGistBtn.addEventListener('click', async function(){
+    const token = tokenInput.value.trim();
+    if(!token){
+      setSyncStatus('먼저 GitHub 토큰을 입력해 주세요', 'warn');
+      return;
+    }
+    setSyncStatus('저장소 만드는 중…');
+    try{
+      const gistId = await createGist(token);
+      gistInput.value = gistId;
+      saveDeviceConfig(token, gistId);
+      setSyncStatus('저장소 생성 완료 · 아래 코드를 휴대폰에 전달하세요', 'ok');
+      showSyncCode(token, gistId);
+      if(lastWorkbookRows){
+        await pushGist(token, gistId, lastWorkbookRows);
+      }
+    }catch(e){
+      setSyncStatus(e.message, 'warn');
+    }
+  });
+
+  saveSyncBtn.addEventListener('click', function(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId){
+      setSyncStatus('토큰과 Gist ID를 모두 입력해 주세요', 'warn');
+      return;
+    }
+    saveDeviceConfig(token, gistId);
+    showSyncCode(token, gistId);
+    setSyncStatus('이 기기에 저장되었습니다', 'ok');
+  });
+
+  applyPasteBtn.addEventListener('click', async function(){
+    const raw = pasteInput.value.trim();
+    const parts = raw.split('::');
+    if(parts.length !== 2 || !parts[0] || !parts[1]){
+      setSyncStatus('동기화 코드 형식이 올바르지 않습니다', 'warn');
+      return;
+    }
+    tokenInput.value = parts[0];
+    gistInput.value = parts[1];
+    saveDeviceConfig(parts[0], parts[1]);
+    setSyncStatus('적용됨 · 불러오는 중…');
+    await doPull();
+  });
+
+  async function doPull(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId){
+      setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
       return false;
     }
     try{
-      const res = await window.storage.get(STORAGE_KEY, false);
-      if(!res || !res.value){
-        syncStatus.textContent = '☁️ 아직 업로드된 데이터가 없습니다';
-        syncStatus.className = '';
+      const data = await pullGist(token, gistId);
+      if(data.rows){
+        lastWorkbookRows = data.rows;
+        setSyncStatus('☁️ ' + formatRelative(data.uploadedAt) + ' 동기화됨', 'ok');
+        return true;
+      }else{
+        setSyncStatus('☁️ 아직 업로드된 데이터가 없습니다');
         return false;
       }
-      const data = JSON.parse(res.value);
-      lastWorkbookRows = data.rows;
-      syncStatus.textContent = '☁️ ' + formatRelative(data.uploadedAt) + ' 동기화됨';
-      syncStatus.className = 'ok';
-      return true;
     }catch(e){
-      syncStatus.textContent = '☁️ 아직 업로드된 데이터가 없습니다';
-      syncStatus.className = '';
+      setSyncStatus(e.message, 'warn');
       return false;
     }
   }
 
+  syncBtn.addEventListener('click', async function(){
+    setSyncStatus('불러오는 중…');
+    await doPull();
+    render();
+  });
+
+  // ---------- excel parsing (unchanged logic) ----------
   function esc(s){
     return String(s==null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
-
   function cleanCell(v){
     if(v==null) return '';
     return String(v).replace(/\r\n/g,'\n').trim();
   }
-
   function normPhone(p){
     return cleanCell(p).replace(/[^\d+]/g,'');
   }
-
-  function isRemote(location, address){
+  function isRemote(location){
     const l = cleanCell(location).toLowerCase();
     return l.includes('remote') || l.includes('원격');
   }
-
   function mentionsOwner(details){
     const d = cleanCell(details);
     return /선주\s*(입회|참석)|owner\s*attendance/i.test(d);
   }
-
   function showError(msg){
     errorState.innerHTML = '<div class="errorbar">⚠️ ' + esc(msg) + '</div>';
   }
@@ -515,39 +599,26 @@
     for(let i=0;i<Math.min(rows.length,15);i++){
       const row = rows[i] || [];
       const norm = row.map(c => cleanCell(c).toUpperCase());
-      if(norm.includes('SURVEYOR') && norm.includes('LOCATION')){
-        return i;
-      }
+      if(norm.includes('SURVEYOR') && norm.includes('LOCATION')) return i;
     }
     return -1;
   }
 
   function parseWorkbook(rows){
-    // rows: array of arrays (row 0 = first excel row)
     const headerIdx = findHeaderRow(rows);
     if(headerIdx === -1){
       throw new Error('시트에서 SURVEYOR / LOCATION 헤더를 찾지 못했습니다. 원본 WORK BOOK 형식인지 확인해 주세요.');
     }
     const header = rows[headerIdx].map(c => cleanCell(c).toUpperCase());
     const col = name => header.indexOf(name);
-
     const idx = {
-      id: col('ID'),
-      project: col('PROJECT'),
-      customer: col('CUSTOMER'),
-      location: col('LOCATION'),
-      address: col('ADDRESS'),
-      phone: col('PHONE CONTACT'),
-      asset: col('ASSET CATEGORY'),
-      intended: col('INTENDED FOR'),
-      details: col('REQUESTDETAILS'),
-      surveyor: col('SURVEYOR'),
+      id: col('ID'), project: col('PROJECT'), customer: col('CUSTOMER'),
+      location: col('LOCATION'), address: col('ADDRESS'), phone: col('PHONE CONTACT'),
+      asset: col('ASSET CATEGORY'), intended: col('INTENDED FOR'),
+      details: col('REQUESTDETAILS'), surveyor: col('SURVEYOR'),
     };
-    if(idx.surveyor === -1){
-      throw new Error('SURVEYOR 열을 찾지 못했습니다.');
-    }
+    if(idx.surveyor === -1) throw new Error('SURVEYOR 열을 찾지 못했습니다.');
 
-    // try to read day/date banner from the row above header (row 0 usually)
     let dayText = '', dateText = '';
     for(let i=0;i<headerIdx;i++){
       (rows[i]||[]).forEach(c=>{
@@ -564,19 +635,13 @@
       const row = rows[r];
       if(!row) continue;
       const idVal = row[idx.id];
-      if(idVal==null || cleanCell(idVal)==='') continue; // skip footer/summary rows without an ID
-      if(isNaN(Number(idVal))) continue; // footer notes land in col A sometimes as text
+      if(idVal==null || cleanCell(idVal)==='') continue;
+      if(isNaN(Number(idVal))) continue;
       out.push({
-        id: cleanCell(idVal),
-        project: cleanCell(row[idx.project]),
-        customer: cleanCell(row[idx.customer]),
-        location: cleanCell(row[idx.location]),
-        address: cleanCell(row[idx.address]),
-        phone: cleanCell(row[idx.phone]),
-        asset: cleanCell(row[idx.asset]),
-        intended: cleanCell(row[idx.intended]),
-        details: cleanCell(row[idx.details]),
-        surveyor: cleanCell(row[idx.surveyor]),
+        id: cleanCell(idVal), project: cleanCell(row[idx.project]), customer: cleanCell(row[idx.customer]),
+        location: cleanCell(row[idx.location]), address: cleanCell(row[idx.address]), phone: cleanCell(row[idx.phone]),
+        asset: cleanCell(row[idx.asset]), intended: cleanCell(row[idx.intended]),
+        details: cleanCell(row[idx.details]), surveyor: cleanCell(row[idx.surveyor]),
       });
     }
     return {items: out, dayText, dateText};
@@ -586,16 +651,10 @@
     const groups = [];
     const map = new Map();
     items.forEach(it=>{
-      const remote = isRemote(it.location, it.address);
+      const remote = isRemote(it.location);
       const key = (it.customer||'').toUpperCase() + '||' + ((it.address||it.location||'')).toUpperCase();
       if(!map.has(key)){
-        const g = {
-          customer: it.customer || '(업체명 미기재)',
-          location: it.location,
-          address: it.address,
-          remote: remote,
-          items: [],
-        };
+        const g = {customer: it.customer || '(업체명 미기재)', location: it.location, address: it.address, remote, items: []};
         map.set(key, g);
         groups.push(g);
       }
@@ -631,21 +690,16 @@
     if(!g.remote){
       actions += `<a class="actionbtn map" href="${kakaoMapLink(addressForMap)}" target="_blank" rel="noopener">📍 검사장소 (카카오맵)</a>`;
     }
-    // group-level call button: use the first item's phone if all items share the same number
     const uniquePhones = [...new Set(g.items.map(it=>normPhone(it.phone)).filter(Boolean))];
     if(uniquePhones.length === 1){
       actions += `<a class="actionbtn call" href="tel:${uniquePhones[0]}">📞 전화하기</a>`;
     }
     const actionRow = actions ? `<div class="actionrow">${actions}</div>` : '';
-
     const addressLine = g.address ? `<div style="padding:0 16px 10px; font-size:12px; color:var(--ink-soft);">${esc(g.address)}</div>` : '';
 
     const itemsHtml = g.items.map(it=>{
       const showOwnPhone = uniquePhones.length !== 1 && it.phone;
-      const phoneLine = showOwnPhone ? `
-        <div class="item-phone-row">
-          <a href="tel:${normPhone(it.phone)}">📞 ${esc(it.phone)}</a>
-        </div>` : '';
+      const phoneLine = showOwnPhone ? `<div class="item-phone-row"><a href="tel:${normPhone(it.phone)}">📞 ${esc(it.phone)}</a></div>` : '';
       const intendedLine = it.intended ? `<div class="item-intended">${esc(it.intended)}</div>` : '';
       const memoLine = it.details ? `<div class="memo"><b>특이사항</b><br>${esc(it.details)}</div>` : '';
       return `
@@ -724,7 +778,7 @@
     if(!file) return;
     clearError();
     const reader = new FileReader();
-    reader.onload = function(ev){
+    reader.onload = async function(ev){
       try{
         const data = new Uint8Array(ev.target.result);
         const wb = XLSX.read(data, {type:'array', cellDates:false});
@@ -735,7 +789,17 @@
         fileMeta.textContent = file.name;
         fileMetaRow.style.display = '';
         render();
-        saveToStorage(rows);
+
+        const {token, gistId} = getDeviceConfig();
+        if(token && gistId){
+          setSyncStatus('업로드 중…');
+          try{
+            await pushGist(token, gistId, rows);
+            setSyncStatus('☁️ 방금 동기화됨', 'ok');
+          }catch(err){
+            setSyncStatus(err.message, 'warn');
+          }
+        }
       }catch(err){
         showError('파일을 읽는 중 문제가 발생했습니다: ' + err.message);
       }
@@ -755,15 +819,16 @@
     dateSub.textContent = '엑셀을 올리면 담당 업무만 골라 정리합니다';
     render();
   });
-  syncBtn.addEventListener('click', async function(){
-    syncStatus.textContent = '☁️ 불러오는 중…';
-    syncStatus.className = '';
-    await loadFromStorage();
-    render();
-  });
 
   (async function init(){
-    await loadFromStorage();
+    loadDeviceConfig();
+    const {token, gistId} = getDeviceConfig();
+    if(token && gistId){
+      setSyncStatus('불러오는 중…');
+      await doPull();
+    }else{
+      setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
+    }
     render();
   })();
 })();
