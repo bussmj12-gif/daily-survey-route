@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>오늘의 검사 일정</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#EEF1F4;
+    --surface:#FFFFFF;
+    --ink:#161D27;
+    --ink-soft:#5C6673;
+    --ink-faint:#8B93A0;
+    --border:#DCE1E7;
+    --accent:#F2660D;
+    --accent-soft:#FFE7D6;
+    --remote:#2B5FCC;
+    --remote-soft:#DEE8FF;
+    --owner:#B8860B;
+    --owner-soft:#FFF3D6;
+    --ok:#1E8A5F;
+    --danger:#C4432B;
+    --radius:14px;
+    --shadow: 0 1px 2px rgba(22,29,39,.05), 0 6px 16px rgba(22,29,39,.06);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+    padding-bottom:48px;
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:0 16px;}
+
+  /* ===== Header / stamp banner ===== */
+  header{
+    background:var(--ink);
+    color:#fff;
+    padding:22px 0 20px;
+    position:relative;
+    overflow:hidden;
+  }
+  header .wrap{position:relative;z-index:1;}
+  header .eyebrow{
+    font-family:'Space Mono',monospace;
+    font-size:11px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:#FFB87A;
+    margin:0 0 6px;
+  }
+  header h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:26px;
+    font-weight:700;
+    margin:0 0 4px;
+    letter-spacing:-.01em;
+  }
+  header .sub{
+    font-size:13px;
+    color:#B7C0CC;
+    margin:0;
+  }
+  .stampring{
+    position:absolute;
+    right:-30px; top:-30px;
+    width:150px;height:150px;
+    border:2px dashed rgba(255,255,255,.14);
+    border-radius:50%;
+  }
+  .stampring::after{
+    content:"";
+    position:absolute; inset:14px;
+    border:1px solid rgba(255,255,255,.1);
+    border-radius:50%;
+  }
+
+  /* ===== Control bar ===== */
+  .controls{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:16px;
+    margin-top:-14px;
+    position:relative;
+    z-index:2;
+  }
+  .row{display:flex; gap:10px; align-items:center;}
+  .row + .row{margin-top:10px;}
+  label.field-label{
+    font-size:11px;
+    font-weight:600;
+    color:var(--ink-soft);
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    white-space:nowrap;
+  }
+  input[type=text]{
+    font-family:'Space Mono',monospace;
+    font-size:14px;
+    font-weight:700;
+    letter-spacing:.05em;
+    border:1.5px solid var(--border);
+    border-radius:9px;
+    padding:9px 10px;
+    width:84px;
+    text-transform:uppercase;
+    color:var(--ink);
+  }
+  input[type=text]:focus{outline:none;border-color:var(--accent);}
+  .filebtn{
+    flex:1;
+    position:relative;
+    overflow:hidden;
+  }
+  .filebtn input[type=file]{
+    position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%;
+  }
+  .filebtn .visual{
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    background:var(--accent);
+    color:#fff;
+    font-weight:700;
+    font-size:14px;
+    border-radius:9px;
+    padding:11px 14px;
+    text-align:center;
+  }
+  .filename{
+    font-size:12px;
+    color:var(--ink-soft);
+    margin-top:8px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .resetlink{
+    font-size:12px;
+    color:var(--ink-faint);
+    text-decoration:underline;
+    cursor:pointer;
+    background:none;border:none;padding:0;
+  }
+  .syncrow{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-top:10px;
+    padding-top:10px;
+    border-top:1px dashed var(--border);
+  }
+  .syncrow #syncStatus{
+    font-size:11.5px;
+    color:var(--ink-soft);
+  }
+  .syncrow #syncStatus.ok{color:var(--ok);}
+  .syncrow #syncStatus.warn{color:var(--danger);}
+  .synclink{
+    font-size:12px;
+    font-weight:600;
+    color:var(--remote);
+    background:none;
+    border:none;
+    cursor:pointer;
+    padding:0;
+    white-space:nowrap;
+  }
+
+  /* ===== Summary strip ===== */
+  .summary{
+    display:flex;
+    gap:8px;
+    margin-top:14px;
+  }
+  .summary .chip{
+    flex:1;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:11px;
+    padding:10px 8px;
+    text-align:center;
+  }
+  .summary .chip .num{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:20px;
+    font-weight:700;
+    line-height:1;
+  }
+  .summary .chip .lbl{
+    font-size:10.5px;
+    color:var(--ink-soft);
+    margin-top:4px;
+    letter-spacing:.02em;
+  }
+  .summary .chip.onsite .num{color:var(--accent);}
+  .summary .chip.remote .num{color:var(--remote);}
+  .summary .chip.owner .num{color:var(--owner);}
+
+  /* ===== Empty state ===== */
+  .empty{
+    background:var(--surface);
+    border:1px dashed var(--border);
+    border-radius:var(--radius);
+    padding:36px 20px;
+    text-align:center;
+    margin-top:18px;
+  }
+  .empty .icon{font-size:30px; margin-bottom:10px;}
+  .empty h3{font-family:'Space Grotesk',sans-serif; margin:0 0 6px; font-size:16px;}
+  .empty p{font-size:13px; color:var(--ink-soft); margin:0; line-height:1.6;}
+  .errorbar{
+    margin-top:14px;
+    background:#FDEDE9;
+    border:1px solid #F1C4B8;
+    color:var(--danger);
+    border-radius:10px;
+    padding:12px 14px;
+    font-size:13px;
+    line-height:1.5;
+  }
+
+  /* ===== Stops list ===== */
+  .stops{margin-top:18px; display:flex; flex-direction:column; gap:12px;}
+  .stop{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  .stop-head{
+    display:flex;
+    gap:12px;
+    padding:14px 16px 12px;
+    align-items:flex-start;
+  }
+  .stampnum{
+    flex:0 0 auto;
+    width:34px;height:34px;
+    border-radius:50%;
+    border:2px dashed var(--ink-faint);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Space Mono',monospace;
+    font-weight:700;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .stop.is-remote .stampnum{border-color:var(--remote); color:var(--remote);}
+  .stop-titles{flex:1; min-width:0;}
+  .stop-titles .customer{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:16.5px;
+    font-weight:700;
+    color:var(--ink);
+    margin:0 0 3px;
+    line-height:1.25;
+  }
+  .tagrow{display:flex; flex-wrap:wrap; gap:6px; align-items:center;}
+  .tag{
+    font-size:10.5px;
+    font-weight:700;
+    letter-spacing:.03em;
+    padding:3px 8px;
+    border-radius:999px;
+    text-transform:uppercase;
+  }
+  .tag.onsite{background:var(--accent-soft); color:var(--accent);}
+  .tag.remote{background:var(--remote-soft); color:var(--remote);}
+  .tag.owner{background:var(--owner-soft); color:var(--owner);}
+  .tag.count{background:var(--bg); color:var(--ink-soft);}
+
+  .actionrow{
+    display:flex; gap:8px;
+    padding:0 16px 14px;
+  }
+  .actionbtn{
+    flex:1;
+    display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:10px 10px;
+    border-radius:10px;
+    font-size:13px;
+    font-weight:600;
+    text-decoration:none;
+    border:1.5px solid var(--border);
+    color:var(--ink);
+    background:var(--bg);
+  }
+  .actionbtn.map{border-color:#F3C7A2; background:var(--accent-soft); color:#B8480A;}
+  .actionbtn.call{border-color:#c9d3de;}
+  .actionbtn svg{width:15px;height:15px;flex:0 0 auto;}
+
+  .items{
+    border-top:1px solid var(--border);
+  }
+  .item{
+    padding:12px 16px;
+    display:flex; flex-direction:column; gap:5px;
+  }
+  .item + .item{border-top:1px dashed var(--border);}
+  .item-top{
+    display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+  }
+  .item-id{
+    font-family:'Space Mono',monospace;
+    font-size:10.5px;
+    color:var(--ink-faint);
+  }
+  .item-asset{
+    font-size:13.5px;
+    font-weight:600;
+    color:var(--ink);
+    flex:1;
+  }
+  .item-intended{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    white-space:pre-line;
+  }
+  .item-phone-row{
+    display:flex; align-items:center; gap:8px;
+    margin-top:2px;
+  }
+  .item-phone-row a{
+    font-family:'Space Mono',monospace;
+    font-size:12.5px;
+    font-weight:700;
+    color:var(--ok);
+    text-decoration:none;
+    display:flex; align-items:center; gap:5px;
+  }
+  .memo{
+    margin-top:4px;
+    background:#FFFBEF;
+    border:1px solid #F3E4B8;
+    border-radius:8px;
+    padding:8px 10px;
+    font-size:12.5px;
+    line-height:1.55;
+    color:#7A5C10;
+    white-space:pre-line;
+  }
+  .memo b{font-weight:700;}
+
+  footer{
+    text-align:center;
+    font-size:11px;
+    color:var(--ink-faint);
+    margin-top:26px;
+    padding:0 24px;
+    line-height:1.6;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="stampring"></div>
+  <div class="wrap">
+    <p class="eyebrow">Field Inspection Route</p>
+    <h1 id="dateTitle">오늘의 검사 일정</h1>
+    <p class="sub" id="dateSub">엑셀을 올리면 담당 업무만 골라 정리합니다</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="controls">
+    <div class="row">
+      <label class="field-label" for="codeInput">검사관코드</label>
+      <input type="text" id="codeInput" value="SMJ" maxlength="6">
+      <label class="filebtn">
+        <input type="file" id="fileInput" accept=".xlsx,.xls">
+        <span class="visual">📎 엑셀 업로드</span>
+      </label>
+    </div>
+    <div class="row" id="fileMetaRow" style="display:none;">
+      <span class="filename" id="fileMeta"></span>
+      <button class="resetlink" id="resetBtn">초기화</button>
+    </div>
+    <div class="syncrow" id="syncRow">
+      <span id="syncStatus">☁️ 동기화 확인 중…</span>
+      <button class="synclink" id="syncBtn">↻ 새로고침</button>
+    </div>
+  </div>
+
+  <div class="summary" id="summary" style="display:none;">
+    <div class="chip onsite"><div class="num" id="cOnsite">0</div><div class="lbl">방문 지점</div></div>
+    <div class="chip remote"><div class="num" id="cRemote">0</div><div class="lbl">원격 검사</div></div>
+    <div class="chip owner"><div class="num" id="cOwner">0</div><div class="lbl">선주입회</div></div>
+  </div>
+
+  <div class="empty" id="emptyState">
+    <div class="icon">🗂️</div>
+    <h3>업무 배정 엑셀을 올려주세요</h3>
+    <p>전날 받은 WORK BOOK 파일을 그대로 업로드하면<br>검사관코드(기본 SMJ)에 배정된 건만 추려서 보여드립니다.</p>
+  </div>
+
+  <div id="errorState"></div>
+
+  <div class="stops" id="stopsList"></div>
+
+  <footer>
+    검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결, 앱에서 길찾기 버튼을 한 번 더 눌러주세요) · 전화번호를 누르면 바로 통화가 걸립니다.<br>
+    컴퓨터에서 엑셀을 업로드하면 같은 계정의 휴대폰 화면에도 자동으로 동기화됩니다. 휴대폰에서는 업로드 대신 위의 새로고침만 눌러주세요.
+  </footer>
+</div>
+
+<script>
+(function(){
+  const codeInput = document.getElementById('codeInput');
+  const fileInput = document.getElementById('fileInput');
+  const fileMetaRow = document.getElementById('fileMetaRow');
+  const fileMeta = document.getElementById('fileMeta');
+  const resetBtn = document.getElementById('resetBtn');
+  const syncStatus = document.getElementById('syncStatus');
+  const syncBtn = document.getElementById('syncBtn');
+  const emptyState = document.getElementById('emptyState');
+  const errorState = document.getElementById('errorState');
+  const stopsList = document.getElementById('stopsList');
+  const summary = document.getElementById('summary');
+  const STORAGE_KEY = 'daily-route-latest';
+  const dateTitle = document.getElementById('dateTitle');
+  const dateSub = document.getElementById('dateSub');
+
+  let lastWorkbookRows = null; // cached parsed rows, so changing the code re-filters without re-upload
+  let storageAvailable = typeof window.storage !== 'undefined';
+
+  function formatRelative(iso){
+    if(!iso) return '';
+    const then = new Date(iso).getTime();
+    if(isNaN(then)) return '';
+    const diffMin = Math.round((Date.now() - then) / 60000);
+    if(diffMin < 1) return '방금 전';
+    if(diffMin < 60) return diffMin + '분 전';
+    const diffHr = Math.round(diffMin/60);
+    if(diffHr < 24) return diffHr + '시간 전';
+    return new Date(iso).toLocaleString('ko-KR', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  }
+
+  async function saveToStorage(rows){
+    if(!storageAvailable) return;
+    try{
+      const payload = JSON.stringify({rows, uploadedAt: new Date().toISOString()});
+      await window.storage.set(STORAGE_KEY, payload, false);
+      syncStatus.textContent = '☁️ 방금 동기화됨';
+      syncStatus.className = 'ok';
+    }catch(e){
+      // non-fatal: uploader still sees their own data locally even if sync fails
+      syncStatus.textContent = '☁️ 동기화 실패 (' + (e.message||'오류') + ')';
+      syncStatus.className = 'warn';
+    }
+  }
+
+  async function loadFromStorage(){
+    if(!storageAvailable){
+      syncStatus.textContent = '이 환경에서는 기기 간 동기화를 지원하지 않습니다';
+      syncBtn.style.display = 'none';
+      return false;
+    }
+    try{
+      const res = await window.storage.get(STORAGE_KEY, false);
+      if(!res || !res.value){
+        syncStatus.textContent = '☁️ 아직 업로드된 데이터가 없습니다';
+        syncStatus.className = '';
+        return false;
+      }
+      const data = JSON.parse(res.value);
+      lastWorkbookRows = data.rows;
+      syncStatus.textContent = '☁️ ' + formatRelative(data.uploadedAt) + ' 동기화됨';
+      syncStatus.className = 'ok';
+      return true;
+    }catch(e){
+      syncStatus.textContent = '☁️ 아직 업로드된 데이터가 없습니다';
+      syncStatus.className = '';
+      return false;
+    }
+  }
+
+  function esc(s){
+    return String(s==null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function cleanCell(v){
+    if(v==null) return '';
+    return String(v).replace(/\r\n/g,'\n').trim();
+  }
+
+  function normPhone(p){
+    return cleanCell(p).replace(/[^\d+]/g,'');
+  }
+
+  function isRemote(location, address){
+    const l = cleanCell(location).toLowerCase();
+    return l.includes('remote') || l.includes('원격');
+  }
+
+  function mentionsOwner(details){
+    const d = cleanCell(details);
+    return /선주\s*(입회|참석)|owner\s*attendance/i.test(d);
+  }
+
+  function showError(msg){
+    errorState.innerHTML = '<div class="errorbar">⚠️ ' + esc(msg) + '</div>';
+  }
+  function clearError(){ errorState.innerHTML = ''; }
+
+  function findHeaderRow(rows){
+    for(let i=0;i<Math.min(rows.length,15);i++){
+      const row = rows[i] || [];
+      const norm = row.map(c => cleanCell(c).toUpperCase());
+      if(norm.includes('SURVEYOR') && norm.includes('LOCATION')){
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function parseWorkbook(rows){
+    // rows: array of arrays (row 0 = first excel row)
+    const headerIdx = findHeaderRow(rows);
+    if(headerIdx === -1){
+      throw new Error('시트에서 SURVEYOR / LOCATION 헤더를 찾지 못했습니다. 원본 WORK BOOK 형식인지 확인해 주세요.');
+    }
+    const header = rows[headerIdx].map(c => cleanCell(c).toUpperCase());
+    const col = name => header.indexOf(name);
+
+    const idx = {
+      id: col('ID'),
+      project: col('PROJECT'),
+      customer: col('CUSTOMER'),
+      location: col('LOCATION'),
+      address: col('ADDRESS'),
+      phone: col('PHONE CONTACT'),
+      asset: col('ASSET CATEGORY'),
+      intended: col('INTENDED FOR'),
+      details: col('REQUESTDETAILS'),
+      surveyor: col('SURVEYOR'),
+    };
+    if(idx.surveyor === -1){
+      throw new Error('SURVEYOR 열을 찾지 못했습니다.');
+    }
+
+    // try to read day/date banner from the row above header (row 0 usually)
+    let dayText = '', dateText = '';
+    for(let i=0;i<headerIdx;i++){
+      (rows[i]||[]).forEach(c=>{
+        const s = cleanCell(c);
+        const dm = s.match(/Day\s*:\s*(\w+)/i);
+        if(dm) dayText = dm[1];
+        const dt = s.match(/Date\s*:\s*([\d.\-\/]+)/i);
+        if(dt) dateText = dt[1];
+      });
+    }
+
+    const out = [];
+    for(let r=headerIdx+1; r<rows.length; r++){
+      const row = rows[r];
+      if(!row) continue;
+      const idVal = row[idx.id];
+      if(idVal==null || cleanCell(idVal)==='') continue; // skip footer/summary rows without an ID
+      if(isNaN(Number(idVal))) continue; // footer notes land in col A sometimes as text
+      out.push({
+        id: cleanCell(idVal),
+        project: cleanCell(row[idx.project]),
+        customer: cleanCell(row[idx.customer]),
+        location: cleanCell(row[idx.location]),
+        address: cleanCell(row[idx.address]),
+        phone: cleanCell(row[idx.phone]),
+        asset: cleanCell(row[idx.asset]),
+        intended: cleanCell(row[idx.intended]),
+        details: cleanCell(row[idx.details]),
+        surveyor: cleanCell(row[idx.surveyor]),
+      });
+    }
+    return {items: out, dayText, dateText};
+  }
+
+  function groupItems(items){
+    const groups = [];
+    const map = new Map();
+    items.forEach(it=>{
+      const remote = isRemote(it.location, it.address);
+      const key = (it.customer||'').toUpperCase() + '||' + ((it.address||it.location||'')).toUpperCase();
+      if(!map.has(key)){
+        const g = {
+          customer: it.customer || '(업체명 미기재)',
+          location: it.location,
+          address: it.address,
+          remote: remote,
+          items: [],
+        };
+        map.set(key, g);
+        groups.push(g);
+      }
+      map.get(key).items.push(it);
+    });
+    return groups;
+  }
+
+  function kakaoMapLink(query){
+    return 'https://map.kakao.com/link/search/' + encodeURIComponent(query);
+  }
+
+  function renderGroup(g, order){
+    const ownerCount = g.items.filter(it=>mentionsOwner(it.details)).length;
+    const addressForMap = g.address || g.customer;
+    const locTag = g.location && g.location.toLowerCase() !== 'remote' ? g.location : '';
+
+    let head = `
+      <div class="stop-head">
+        <div class="stampnum">${order}</div>
+        <div class="stop-titles">
+          <p class="customer">${esc(g.customer)}</p>
+          <div class="tagrow">
+            ${g.remote ? '<span class="tag remote">원격 검사</span>' : '<span class="tag onsite">방문</span>'}
+            ${locTag ? `<span class="tag count">${esc(locTag)}</span>` : ''}
+            ${g.items.length>1 ? `<span class="tag count">${g.items.length}건</span>` : ''}
+            ${ownerCount>0 ? '<span class="tag owner">선주입회</span>' : ''}
+          </div>
+        </div>
+      </div>`;
+
+    let actions = '';
+    if(!g.remote){
+      actions += `<a class="actionbtn map" href="${kakaoMapLink(addressForMap)}" target="_blank" rel="noopener">📍 검사장소 (카카오맵)</a>`;
+    }
+    // group-level call button: use the first item's phone if all items share the same number
+    const uniquePhones = [...new Set(g.items.map(it=>normPhone(it.phone)).filter(Boolean))];
+    if(uniquePhones.length === 1){
+      actions += `<a class="actionbtn call" href="tel:${uniquePhones[0]}">📞 전화하기</a>`;
+    }
+    const actionRow = actions ? `<div class="actionrow">${actions}</div>` : '';
+
+    const addressLine = g.address ? `<div style="padding:0 16px 10px; font-size:12px; color:var(--ink-soft);">${esc(g.address)}</div>` : '';
+
+    const itemsHtml = g.items.map(it=>{
+      const showOwnPhone = uniquePhones.length !== 1 && it.phone;
+      const phoneLine = showOwnPhone ? `
+        <div class="item-phone-row">
+          <a href="tel:${normPhone(it.phone)}">📞 ${esc(it.phone)}</a>
+        </div>` : '';
+      const intendedLine = it.intended ? `<div class="item-intended">${esc(it.intended)}</div>` : '';
+      const memoLine = it.details ? `<div class="memo"><b>특이사항</b><br>${esc(it.details)}</div>` : '';
+      return `
+        <div class="item">
+          <div class="item-top">
+            <span class="item-asset">${esc(it.asset || '(품목 미기재)')}</span>
+            <span class="item-id">#${esc(it.id)}</span>
+          </div>
+          ${intendedLine}
+          ${phoneLine}
+          ${memoLine}
+        </div>`;
+    }).join('');
+
+    const remoteClass = g.remote ? ' is-remote' : '';
+    return `<div class="stop${remoteClass}">${head}${addressLine}${actionRow}<div class="items">${itemsHtml}</div></div>`;
+  }
+
+  function render(){
+    const code = codeInput.value.trim().toUpperCase();
+    stopsList.innerHTML = '';
+    summary.style.display = 'none';
+    clearError();
+
+    if(!lastWorkbookRows){
+      emptyState.style.display = '';
+      return;
+    }
+
+    let parsed;
+    try{
+      parsed = parseWorkbook(lastWorkbookRows);
+    }catch(e){
+      emptyState.style.display = '';
+      showError(e.message);
+      return;
+    }
+
+    if(parsed.dayText || parsed.dateText){
+      dateTitle.textContent = (parsed.dateText || '오늘') + ' 검사 일정';
+      dateSub.textContent = (parsed.dayText ? parsed.dayText + ' · ' : '') + '검사관코드 ' + code + ' 배정 건';
+    }
+
+    const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
+
+    if(mine.length === 0){
+      emptyState.style.display = '';
+      showError('"' + code + '" 코드로 배정된 업무를 찾지 못했습니다. 코드를 확인해 주세요.');
+      return;
+    }
+
+    emptyState.style.display = 'none';
+
+    const groups = groupItems(mine);
+    const onsiteGroups = groups.filter(g=>!g.remote);
+    const remoteGroups = groups.filter(g=>g.remote);
+    const ownerGroupCount = groups.filter(g=>g.items.some(it=>mentionsOwner(it.details))).length;
+
+    document.getElementById('cOnsite').textContent = onsiteGroups.length;
+    document.getElementById('cRemote').textContent = remoteGroups.length;
+    document.getElementById('cOwner').textContent = ownerGroupCount;
+    summary.style.display = '';
+
+    let order = 1;
+    let html = '';
+    onsiteGroups.forEach(g=>{ html += renderGroup(g, order++); });
+    if(remoteGroups.length){
+      html += `<div style="margin:6px 4px 0; font-size:12px; font-weight:700; color:var(--remote); letter-spacing:.02em;">원격 검사</div>`;
+      remoteGroups.forEach(g=>{ html += renderGroup(g, order++); });
+    }
+    stopsList.innerHTML = html;
+  }
+
+  fileInput.addEventListener('change', function(e){
+    const file = e.target.files && e.target.files[0];
+    if(!file) return;
+    clearError();
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      try{
+        const data = new Uint8Array(ev.target.result);
+        const wb = XLSX.read(data, {type:'array', cellDates:false});
+        const sheetName = wb.SheetNames[0];
+        const sheet = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+        lastWorkbookRows = rows;
+        fileMeta.textContent = file.name;
+        fileMetaRow.style.display = '';
+        render();
+        saveToStorage(rows);
+      }catch(err){
+        showError('파일을 읽는 중 문제가 발생했습니다: ' + err.message);
+      }
+    };
+    reader.onerror = function(){
+      showError('파일을 읽지 못했습니다. 다시 시도해 주세요.');
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  codeInput.addEventListener('input', render);
+  resetBtn.addEventListener('click', function(){
+    lastWorkbookRows = null;
+    fileInput.value = '';
+    fileMetaRow.style.display = 'none';
+    dateTitle.textContent = '오늘의 검사 일정';
+    dateSub.textContent = '엑셀을 올리면 담당 업무만 골라 정리합니다';
+    render();
+  });
+  syncBtn.addEventListener('click', async function(){
+    syncStatus.textContent = '☁️ 불러오는 중…';
+    syncStatus.className = '';
+    await loadFromStorage();
+    render();
+  });
+
+  (async function init(){
+    await loadFromStorage();
+    render();
+  })();
+})();
+</script>
+</body>
+</html>
