@@ -291,14 +291,17 @@
   .tag.owner{background:var(--owner-soft); color:var(--owner);}
   .tag.count{background:var(--bg); color:var(--ink-soft);}
 
-  .actionrow{display:flex; gap:8px; padding:0 16px 14px; min-width:0;}
+  .actionrow{display:flex; gap:8px; padding:0 16px 14px; min-width:0; flex-wrap:wrap;}
   .actionbtn{
-    flex:1 1 0; min-width:0; display:flex; align-items:center; justify-content:center; gap:6px;
+    flex:1 1 auto; min-width:88px; display:flex; align-items:center; justify-content:center; gap:6px;
     padding:10px 8px; border-radius:10px; font-size:12.5px; font-weight:600; text-align:center;
     text-decoration:none; border:1.5px solid var(--border); color:var(--ink); background:var(--bg);
     white-space:normal; line-height:1.25; overflow-wrap:anywhere;
+    font-family:inherit; cursor:pointer;
   }
   .actionbtn.map{border-color:#F3C7A2; background:var(--accent-soft); color:#B8480A;}
+  .actionbtn.navi{border-color:#B9D9C9; background:#E6F5EC; color:#166B45;}
+  .actionbtn.copy{border-color:#c9d3de;}
   .actionbtn.call{border-color:#c9d3de;}
 
   .items{border-top:1px solid var(--border);}
@@ -323,6 +326,15 @@
     text-align:center; font-size:11px; color:var(--ink-faint); margin-top:26px;
     padding:0 24px; line-height:1.6;
   }
+
+  .toast{
+    position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(10px);
+    background:var(--ink); color:#fff; font-size:13px; font-weight:600;
+    padding:10px 18px; border-radius:999px; box-shadow:var(--shadow);
+    opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease;
+    z-index:999; max-width:88vw; text-align:center;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 </style>
 </head>
 <body>
@@ -404,6 +416,7 @@
           출발지·도착지와 각 검사장소 주소를 좌표로 변환해 가까운 순서로 방문 지점을 재정렬하고, 지도에 위치를 표시합니다.
           직선거리 기준 계산이라 실제 도로 상황과는 다소 차이가 있을 수 있습니다.<br>
           같은 카카오 <a href="https://developers.kakao.com/console/app" target="_blank" rel="noopener">디벨로퍼스</a> 앱의 <b>REST API 키</b>(주소 변환용)와 <b>JavaScript 키</b>(지도 표시용) 둘 다 입력해 주세요 (이 기기에만 저장됩니다). JavaScript 키를 비워두면 동선 정렬만 되고 지도는 표시되지 않습니다.
+          REST API 키를 입력해두면 아래 검사장소 카드의 <b>카카오내비 바로 연결</b> 버튼도 정확한 좌표로 안내합니다 (비워두면 카카오맵 검색으로 대체됩니다).
         </p>
         <div class="fieldblock">
           <label for="kakaoKeyInput">카카오 REST API 키</label>
@@ -466,10 +479,12 @@
   <div class="stops" id="stopsList"></div>
 
   <footer>
-    검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결, 앱에서 길찾기 버튼을 한 번 더 눌러주세요) · 전화번호를 누르면 바로 통화가 걸립니다.<br>
+    검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결, 앱에서 길찾기 버튼을 한 번 더 눌러주세요) · 카카오내비 버튼은 앱으로 바로 길안내를 시작합니다 · 주소 복사 버튼으로 다른 앱에 붙여넣을 수 있습니다 · 전화번호를 누르면 바로 통화가 걸립니다.<br>
     동기화 데이터는 내 GitHub 비공개 Gist에만 저장되며, 발급한 토큰은 이 브라우저에만 보관됩니다.
   </footer>
 </div>
+
+<div class="toast" id="toastEl"></div>
 
 <script>
 (function(){
@@ -495,6 +510,7 @@
   const summary = document.getElementById('summary');
   const dateTitle = document.getElementById('dateTitle');
   const dateSub = document.getElementById('dateSub');
+  const toastEl = document.getElementById('toastEl');
 
   const kakaoKeyInput = document.getElementById('kakaoKeyInput');
   const kakaoJsKeyInput = document.getElementById('kakaoJsKeyInput');
@@ -521,6 +537,17 @@
   let lastOptimizedOrder = null; // array of group keys in visiting order
   let lastRouteMeta = null; // {start, end, failedCount}
   let kakaoSdkPromise = null; // caches the loaded Maps SDK so we only inject the script once
+  const naviGeocodeCache = new Map(); // address -> {lat,lng} | null, avoids re-hitting the API on repeat taps
+
+  // ---------- toast ----------
+  let toastTimer = null;
+  function showToast(msg){
+    if(!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 2400);
+  }
 
   // ---------- local device settings ----------
   function loadDeviceConfig(){
@@ -938,6 +965,86 @@
     render();
   });
 
+  // ---------- kakao navi deep link ----------
+  async function openKakaoNavi(name, address, btn){
+    const key = kakaoKeyInput.value.trim();
+    let coord = null;
+
+    if(key){
+      if(naviGeocodeCache.has(address)){
+        coord = naviGeocodeCache.get(address);
+      }else{
+        const origLabel = btn ? btn.textContent : '';
+        if(btn) btn.textContent = '🚗 위치 확인 중…';
+        try{ coord = await geocodeAddress(key, address); }
+        catch(e){ coord = null; }
+        naviGeocodeCache.set(address, coord);
+        if(btn) btn.textContent = origLabel;
+      }
+    }
+
+    if(coord){
+      const naviUrl = 'kakaonavi://navigate?name=' + encodeURIComponent(name || address)
+        + '&x=' + coord.lng + '&y=' + coord.lat + '&coord_type=wgs84';
+      window.location.href = naviUrl;
+      // 카카오내비 미설치 기기 대비: 잠시 후에도 화면이 그대로면 카카오맵 검색으로 대체
+      setTimeout(function(){
+        if(!document.hidden){
+          window.open(kakaoMapLink(address), '_blank', 'noopener');
+        }
+      }, 1200);
+    }else{
+      if(!key){
+        showToast('카카오내비 정밀 연결에는 REST API 키가 필요해요 · 카카오맵으로 열었어요');
+      }else{
+        showToast('주소 좌표를 찾지 못해 카카오맵으로 열었어요');
+      }
+      window.open(kakaoMapLink(address), '_blank', 'noopener');
+    }
+  }
+
+  // ---------- copy address ----------
+  async function copyAddress(address, btn){
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        await navigator.clipboard.writeText(address);
+      }else{
+        const ta = document.createElement('textarea');
+        ta.value = address;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      showToast('주소를 복사했어요');
+      if(btn){
+        const orig = btn.textContent;
+        btn.textContent = '✅ 복사됨';
+        setTimeout(function(){ btn.textContent = orig; }, 1400);
+      }
+    }catch(e){
+      showToast('복사에 실패했어요');
+    }
+  }
+
+  // event delegation: card list is re-rendered via innerHTML, so listeners are bound once on the container
+  stopsList.addEventListener('click', function(e){
+    const naviBtn = e.target.closest('[data-navi-address]');
+    if(naviBtn){
+      e.preventDefault();
+      openKakaoNavi(naviBtn.getAttribute('data-navi-name') || '', naviBtn.getAttribute('data-navi-address'), naviBtn);
+      return;
+    }
+    const copyBtn = e.target.closest('[data-copy-address]');
+    if(copyBtn){
+      e.preventDefault();
+      copyAddress(copyBtn.getAttribute('data-copy-address'), copyBtn);
+      return;
+    }
+  });
+
   // ---------- excel parsing (unchanged logic) ----------
   function esc(s){
     return String(s==null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1078,7 +1185,9 @@
 
     let actions = '';
     if(!g.remote){
-      actions += `<a class="actionbtn map" href="${kakaoMapLink(addressForMap)}" target="_blank" rel="noopener">📍 검사장소 (카카오맵)</a>`;
+      actions += `<a class="actionbtn map" href="${kakaoMapLink(addressForMap)}" target="_blank" rel="noopener">🗺️ 카카오맵</a>`;
+      actions += `<button type="button" class="actionbtn navi" data-navi-name="${esc(g.customer)}" data-navi-address="${esc(addressForMap)}">🚗 카카오내비</button>`;
+      actions += `<button type="button" class="actionbtn copy" data-copy-address="${esc(addressForMap)}">📋 주소복사</button>`;
     }
     const uniquePhones = [...new Set(g.items.map(it=>normPhone(it.phone)).filter(Boolean))];
     if(uniquePhones.length === 1){
