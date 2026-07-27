@@ -416,7 +416,7 @@
           출발지·도착지와 각 검사장소 주소를 좌표로 변환해 가까운 순서로 방문 지점을 재정렬하고, 지도에 위치를 표시합니다.
           직선거리 기준 계산이라 실제 도로 상황과는 다소 차이가 있을 수 있습니다.<br>
           같은 카카오 <a href="https://developers.kakao.com/console/app" target="_blank" rel="noopener">디벨로퍼스</a> 앱의 <b>REST API 키</b>(주소 변환용)와 <b>JavaScript 키</b>(지도 표시용) 둘 다 입력해 주세요 (이 기기에만 저장됩니다). JavaScript 키를 비워두면 동선 정렬만 되고 지도는 표시되지 않습니다.
-          REST API 키를 입력해두면 아래 검사장소 카드의 <b>카카오내비 바로 연결</b> 버튼도 정확한 좌표로 안내합니다 (비워두면 카카오맵 검색으로 대체됩니다).
+          REST API 키를 입력해두면 아래 검사장소 카드의 <b>길찾기</b> 버튼도 정확한 좌표로 카카오맵 경로 안내를 엽니다 (비워두면 카카오맵 검색으로 대체됩니다).
         </p>
         <div class="fieldblock">
           <label for="kakaoKeyInput">카카오 REST API 키</label>
@@ -479,7 +479,7 @@
   <div class="stops" id="stopsList"></div>
 
   <footer>
-    검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결, 앱에서 길찾기 버튼을 한 번 더 눌러주세요) · 카카오내비 버튼은 앱으로 바로 길안내를 시작합니다 · 주소 복사 버튼으로 다른 앱에 붙여넣을 수 있습니다 · 전화번호를 누르면 바로 통화가 걸립니다.<br>
+    검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결) · 길찾기 버튼은 좌표 기반으로 카카오맵 경로 안내를 바로 엽니다 (REST API 키 필요) · 주소 복사 버튼으로 다른 앱에 붙여넣을 수 있습니다 · 전화번호를 누르면 바로 통화가 걸립니다.<br>
     동기화 데이터는 내 GitHub 비공개 Gist에만 저장되며, 발급한 토큰은 이 브라우저에만 보관됩니다.
   </footer>
 </div>
@@ -965,8 +965,14 @@
     render();
   });
 
-  // ---------- kakao navi deep link ----------
-  async function openKakaoNavi(name, address, btn){
+  // ---------- kakao map route link (no app auth required, unlike kakaonavi:// scheme) ----------
+  function kakaoRouteLink(name, coord){
+    // Opens 카카오맵 in route-guidance mode (현재위치 -> 목적지). Works via universal
+    // link (app if installed, web otherwise) without any Kakao app key/auth.
+    return 'https://map.kakao.com/link/to/' + encodeURIComponent(name) + ',' + coord.lat + ',' + coord.lng;
+  }
+
+  async function openRoute(name, address, btn){
     const key = kakaoKeyInput.value.trim();
     let coord = null;
 
@@ -984,20 +990,12 @@
     }
 
     if(coord){
-      const naviUrl = 'kakaonavi://navigate?name=' + encodeURIComponent(name || address)
-        + '&x=' + coord.lng + '&y=' + coord.lat + '&coord_type=wgs84';
-      window.location.href = naviUrl;
-      // 카카오내비 미설치 기기 대비: 잠시 후에도 화면이 그대로면 카카오맵 검색으로 대체
-      setTimeout(function(){
-        if(!document.hidden){
-          window.open(kakaoMapLink(address), '_blank', 'noopener');
-        }
-      }, 1200);
+      window.open(kakaoRouteLink(name || address, coord), '_blank', 'noopener');
     }else{
       if(!key){
-        showToast('카카오내비 정밀 연결에는 REST API 키가 필요해요 · 카카오맵으로 열었어요');
+        showToast('정밀 길찾기에는 REST API 키가 필요해요 · 카카오맵 검색으로 열었어요');
       }else{
-        showToast('주소 좌표를 찾지 못해 카카오맵으로 열었어요');
+        showToast('주소 좌표를 찾지 못해 카카오맵 검색으로 열었어요');
       }
       window.open(kakaoMapLink(address), '_blank', 'noopener');
     }
@@ -1034,7 +1032,7 @@
     const naviBtn = e.target.closest('[data-navi-address]');
     if(naviBtn){
       e.preventDefault();
-      openKakaoNavi(naviBtn.getAttribute('data-navi-name') || '', naviBtn.getAttribute('data-navi-address'), naviBtn);
+      openRoute(naviBtn.getAttribute('data-navi-name') || '', naviBtn.getAttribute('data-navi-address'), naviBtn);
       return;
     }
     const copyBtn = e.target.closest('[data-copy-address]');
@@ -1186,7 +1184,7 @@
     let actions = '';
     if(!g.remote){
       actions += `<a class="actionbtn map" href="${kakaoMapLink(addressForMap)}" target="_blank" rel="noopener">🗺️ 카카오맵</a>`;
-      actions += `<button type="button" class="actionbtn navi" data-navi-name="${esc(g.customer)}" data-navi-address="${esc(addressForMap)}">🚗 카카오내비</button>`;
+      actions += `<button type="button" class="actionbtn navi" data-navi-name="${esc(g.customer)}" data-navi-address="${esc(addressForMap)}">🚗 길찾기</button>`;
       actions += `<button type="button" class="actionbtn copy" data-copy-address="${esc(addressForMap)}">📋 주소복사</button>`;
     }
     const uniquePhones = [...new Set(g.items.map(it=>normPhone(it.phone)).filter(Boolean))];
