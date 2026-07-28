@@ -820,6 +820,36 @@
       const hit = await tryGeocodeQuery(key, q, 'keyword');
       if(hit) return hit;
     }
+    // Kakao's geocoder is tuned for Korean-script addresses; romanized/English
+    // worksheet addresses (e.g. "95-12, Noksansaneop-daero, Gangseo-gu, Busan")
+    // often return nothing from either endpoint above. Nominatim (OpenStreetMap)
+    // handles romanized Korean addresses noticeably better, so it's used as a
+    // last-resort fallback rather than the primary source (Kakao's own map/POI
+    // data is more complete for Korean business addresses when it does match).
+    for(const q of candidates){
+      const hit = await geocodeViaNominatim(q);
+      if(hit) return hit;
+    }
+    return null;
+  }
+
+  // Nominatim has a 1 request/second usage policy for its public instance.
+  // This is only reached as a fallback (see above), so real-world call volume
+  // is low, but we still space out calls defensively.
+  let lastNominatimCallAt = 0;
+  async function geocodeViaNominatim(query){
+    const waitMs = Math.max(0, 1100 - (Date.now() - lastNominatimCallAt));
+    if(waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+    lastNominatimCallAt = Date.now();
+    try{
+      const res = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=kr&q=' + encodeURIComponent(query));
+      if(res.ok){
+        const data = await res.json();
+        if(data && data.length){
+          return {lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon)};
+        }
+      }
+    }catch(e){ /* network/CORS failure -> treat as not found */ }
     return null;
   }
 
