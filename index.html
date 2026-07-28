@@ -815,7 +815,7 @@
     // Cleaned versions go first since they're the most likely to succeed;
     // the untouched original and older fallbacks stay in the list too, in
     // case a given address didn't actually need trimming.
-    const candidates = [...cleanedVariants(s), s];
+    let candidates = [...cleanedVariants(s), s];
     const parenMatches = [...s.matchAll(/\(([^()]+)\)/g)];
     parenMatches.forEach(m=>{
       const inner = m[1].trim();
@@ -827,7 +827,34 @@
     if(stripped && stripped !== s){
       candidates.push(stripped, ...cleanedVariants(stripped));
     }
+    // Official Korean road-name addresses always have a space between the
+    // road name and the building number ("녹산산단27로 9"), but worksheet
+    // data entry sometimes omits it ("녹산산단27로9"). Kakao's address API
+    // can be strict about this, so add spaced versions alongside.
+    const spaced = candidates
+      .filter(c => /(로|길)\d/.test(c))
+      .map(c => c.replace(/(로|길)(\d)/g, '$1 $2'));
+    candidates = candidates.concat(spaced);
     return [...new Set(candidates)].filter(Boolean);
+  }
+
+  // Last-resort fallback: if even the cleaned address can't be resolved
+  // (common for precise industrial-park addresses that Nominatim doesn't have
+  // mapped), progressively drop the most specific part and retry so we land
+  // near the right street/district/city instead of failing outright. Korean
+  // addresses go broad-to-specific left-to-right (drop trailing words);
+  // comma-separated (typically romanized) addresses go specific-to-broad
+  // left-to-right (drop leading segments).
+  function broaderVariants(s){
+    const variants = [];
+    if(s.includes(',')){
+      const parts = s.split(',').map(p=>p.trim()).filter(Boolean);
+      for(let i=1; i<parts.length; i++) variants.push(parts.slice(i).join(', '));
+    }else{
+      const parts = s.split(/\s+/).filter(Boolean);
+      for(let n=parts.length-1; n>=1; n--) variants.push(parts.slice(0,n).join(' '));
+    }
+    return variants;
   }
 
   async function tryGeocodeQuery(key, query, endpoint){
@@ -864,6 +891,14 @@
     // data is more complete for Korean business addresses when it does match).
     for(const q of candidates){
       const hit = await geocodeViaNominatim(q);
+      if(hit) return hit;
+    }
+    // Still nothing? Fall back to progressively broader chunks of the best
+    // candidate (see broaderVariants) so we land near the right street,
+    // district, or city rather than failing completely.
+    for(const q of broaderVariants(candidates[0])){
+      let hit = await tryGeocodeQuery(key, q, 'keyword');
+      if(!hit) hit = await geocodeViaNominatim(q);
       if(hit) return hit;
     }
     return null;
