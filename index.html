@@ -775,13 +775,47 @@
     routeStatus.style.color = kind === 'warn' ? 'var(--danger)' : (kind === 'ok' ? 'var(--ok)' : '');
   }
 
-  // Real workbook ADDRESS cells are inconsistently formatted: sometimes a clean
-  // address, sometimes "회사명 (주소)" or "주소 (건물명)". We try several
-  // derived candidates rather than assuming one fixed layout.
+  // Field worksheets often append human-friendly extras that break geocoding:
+  // a business nickname after the road+building number ("녹산산단27로9 마린텍"),
+  // or on romanized addresses, a mid-string postal code ("Gangseo-gu 46753 Busan")
+  // or a company name tacked on after the city ("Gangseo-gu, Busan PK TEC").
+  // These trims are safe even when there's nothing to remove -- they either
+  // return the input unchanged, or drop trailing text that isn't part of the
+  // geocodable address anyway (nickname, floor number, company name, country).
+  function stripTrailingKoreanNickname(s){
+    const re = /(로|길)\s*\d+(?:-\d+)?/g;
+    let lastEnd = -1, m;
+    while((m = re.exec(s)) !== null){
+      lastEnd = m.index + m[0].length;
+    }
+    if(lastEnd === -1) return s;
+    const head = s.slice(0, lastEnd);
+    const rest = s.slice(lastEnd);
+    return /\S/.test(rest) ? head.trim() : s;
+  }
+  const KR_CITY_PATTERN = /\b(Seoul|Busan|Incheon|Daegu|Daejeon|Gwangju|Ulsan|Sejong|Suwon|Gyeonggi|Gangwon|Chungcheongbuk|Chungcheongnam|Chungbuk|Chungnam|Jeollabuk|Jeollanam|Jeonbuk|Jeonnam|Gyeongsangbuk|Gyeongsangnam|Gyeongbuk|Gyeongnam|Jeju)\b/i;
+  function stripEnglishSuffix(s){
+    let out = s.replace(/\b\d{5}\b/g, ' ').replace(/\s+/g,' ').trim();
+    const cm = out.match(KR_CITY_PATTERN);
+    if(cm) out = out.slice(0, cm.index + cm[0].length);
+    return out.trim();
+  }
+  function cleanedVariants(s){
+    const out = [];
+    const ko = stripTrailingKoreanNickname(s);
+    if(ko !== s) out.push(ko);
+    const en = stripEnglishSuffix(s);
+    if(en !== s) out.push(en);
+    return out;
+  }
+
   function buildAddressCandidates(raw){
     const s = cleanCell(raw);
     if(!s) return [];
-    const candidates = [s];
+    // Cleaned versions go first since they're the most likely to succeed;
+    // the untouched original and older fallbacks stay in the list too, in
+    // case a given address didn't actually need trimming.
+    const candidates = [...cleanedVariants(s), s];
     const parenMatches = [...s.matchAll(/\(([^()]+)\)/g)];
     parenMatches.forEach(m=>{
       const inner = m[1].trim();
@@ -790,7 +824,9 @@
       }
     });
     const stripped = s.replace(/\([^()]*\)/g, ' ').replace(/\s+/g,' ').trim();
-    if(stripped && stripped !== s) candidates.push(stripped);
+    if(stripped && stripped !== s){
+      candidates.push(stripped, ...cleanedVariants(stripped));
+    }
     return [...new Set(candidates)].filter(Boolean);
   }
 
