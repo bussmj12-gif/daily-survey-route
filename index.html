@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>오늘의 검사 일정</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#161D27">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -297,6 +299,13 @@
   .routestrip .node.owner-node{color:#FFD166; font-weight:800;}
   .tag.count{background:var(--bg); color:var(--ink-soft);}
 
+  .stop.is-done{opacity:0.5; filter:grayscale(0.4);}
+  .stop.is-done .actionrow, .stop.is-done .addrline .addrbtn{pointer-events:none;}
+  .donebtn{
+    flex:0 0 auto; border:1.5px solid var(--border); background:var(--surface); color:var(--ink-soft);
+    border-radius:8px; padding:6px 10px; font-size:11.5px; font-weight:700; cursor:pointer; white-space:nowrap;
+  }
+  .stop.is-done .donebtn{background:var(--ok); border-color:var(--ok); color:#fff;}
   .addrline{display:flex; align-items:center; gap:6px; padding:0 16px 10px; font-size:12px; color:var(--ink-soft); flex-wrap:wrap;}
   .addrline .addrtext{flex:1 1 auto; min-width:0; overflow-wrap:anywhere;}
   .addrline .addrbadge{
@@ -467,8 +476,14 @@
         <div class="fieldblock">
           <label>동선 정렬 방식</label>
           <div class="ordermode">
-            <label><input type="radio" name="orderMode" value="optimal"> 최단 동선</label>
             <label><input type="radio" name="orderMode" value="ownerFirst" checked> ⭐ 선주입회 먼저 방문 후 나머지 최적화</label>
+            <label><input type="radio" name="orderMode" value="optimal"> 최단 동선</label>
+            <label><input type="radio" name="orderMode" value="manual"> 🔢 검사관 지정 우선권</label>
+          </div>
+          <div id="manualPriorityRow" style="display:none; margin-top:8px; align-items:center; gap:8px;">
+            <span class="helptext" style="white-space:nowrap;">아래 목록 번호</span>
+            <input type="number" id="manualPriorityInput" min="1" placeholder="예: 6" style="width:70px; font-family:'Space Mono',monospace; font-size:13.5px; font-weight:700; border:1.5px solid var(--border); border-radius:9px; padding:9px 8px;">
+            <span class="helptext">번을 첫 방문지로 지정</span>
           </div>
         </div>
 
@@ -503,7 +518,7 @@
   <div class="stops" id="stopsList"></div>
 
   <footer>
-    검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결) · 길찾기 버튼은 현재 위치 권한 허용 시 좌표 기반으로 카카오맵 경로 안내를 바로 엽니다 (REST API 키 필요) · 주소 복사 버튼으로 다른 앱에 붙여넣을 수 있습니다 · 전화번호를 누르면 바로 통화가 걸립니다.<br>
+    검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결) · 길찾기 버튼은 좌표 기반으로 카카오맵 경로 안내를 바로 엽니다 (REST API 키 필요, 출발지는 카카오맵 앱이 현재 위치로 자동 설정) · 주소 복사 버튼으로 다른 앱에 붙여넣을 수 있습니다 · 전화번호를 누르면 바로 통화가 걸립니다.<br>
     동기화 데이터는 내 GitHub 비공개 Gist에만 저장되며, 발급한 토큰은 이 브라우저에만 보관됩니다.
   </footer>
 </div>
@@ -547,6 +562,8 @@
   const optimizeBtn = document.getElementById('optimizeBtn');
   const resetOrderBtn = document.getElementById('resetOrderBtn');
   const routeStatus = document.getElementById('routeStatus');
+  const manualPriorityRow = document.getElementById('manualPriorityRow');
+  const manualPriorityInput = document.getElementById('manualPriorityInput');
   const routeStrip = document.getElementById('routeStrip');
   const mapPanel = document.getElementById('mapPanel');
 
@@ -557,10 +574,14 @@
   const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
   const LS_PLACES = 'daily-route-fixed-places';
   const LS_ADDR_OVERRIDES = 'daily-route-address-overrides';
+  const LS_COMPLETED = 'daily-route-completed';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
   let lastRouteMeta = null; // {start, end, failedCount}
+  let lastRenderedOnsiteGroups = []; // onsite groups in the order currently shown on screen, so "검사관 지정 우선권" can map a displayed number back to a group
+  let completedKeys = new Set(); // groupKey() of stops marked 완료 for today's workbook
+  let lastCompletedDateKey = null;
   let kakaoSdkPromise = null; // caches the loaded Maps SDK so we only inject the script once
   const naviGeocodeCache = new Map(); // address -> {lat,lng} | null, avoids re-hitting the API on repeat taps
 
@@ -756,6 +777,29 @@
     const raw = g.address || g.customer;
     const overrides = getAddressOverrides();
     return overrides[raw] || raw;
+  }
+  // Lets an inspector bypass geocoding entirely for a stubborn address by
+  // typing exact coordinates (from Kakao Map's own "좌표 복사"/공유 기능)
+  // as the override, e.g. "35.0932,128.8452". Kakao's public REST address
+  // API occasionally lacks an entry that the consumer map website itself
+  // can find, so this is a guaranteed-to-work escape hatch.
+  function parseLatLngOverride(s){
+    const m = String(s).trim().match(/^(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)$/);
+    return m ? {lat: parseFloat(m[1]), lng: parseFloat(m[2])} : null;
+  }
+
+  // ---------- "검사 완료" toggle (per stop, resets automatically for a new day's workbook) ----------
+  function loadCompletedForDate(dateKey){
+    try{
+      const stored = JSON.parse(localStorage.getItem(LS_COMPLETED) || 'null');
+      if(stored && stored.date === dateKey) return new Set(stored.keys);
+    }catch(e){}
+    return new Set();
+  }
+  function saveCompletedForDate(dateKey, keysSet){
+    try{
+      localStorage.setItem(LS_COMPLETED, JSON.stringify({date: dateKey, keys: [...keysSet]}));
+    }catch(e){}
   }
 
   // ---------- fixed places (home/office etc.) ----------
@@ -1021,6 +1065,12 @@
     });
   }
 
+  document.querySelectorAll('input[name="orderMode"]').forEach(function(radio){
+    radio.addEventListener('change', function(){
+      manualPriorityRow.style.display = (radio.value === 'manual' && radio.checked) ? 'flex' : 'none';
+    });
+  });
+
   optimizeBtn.addEventListener('click', async function(){
     const key = kakaoKeyInput.value.trim();
     if(key) localStorage.setItem(LS_KAKAO_KEY, key);
@@ -1053,7 +1103,8 @@
 
     const coords = [];
     for(const g of groups){
-      const c = await geocodeAddress(key, effectiveAddressFor(g));
+      const addr = effectiveAddressFor(g);
+      const c = parseLatLngOverride(addr) || await geocodeAddress(key, addr);
       coords.push({group: g, coord: c});
       done++; setRouteStatus('좌표 변환 중… (' + done + '/' + (groups.length + 1) + ')');
     }
@@ -1084,14 +1135,36 @@
     const orderModeEl = document.querySelector('input[name="orderMode"]:checked');
     const orderMode = orderModeEl ? orderModeEl.value : 'ownerFirst';
     let ordered;
+    let excludeKeyFromFailed = null;
     if(orderMode === 'ownerFirst'){
       const ownerUsable = usable.filter(c => c.group.items.some(it => mentionsOwner(it.details)));
       const restUsable = usable.filter(c => !c.group.items.some(it => mentionsOwner(it.details)));
       ordered = nearestChain(ownerUsable).concat(nearestChain(restUsable));
+    }else if(orderMode === 'manual'){
+      const idx = parseInt(manualPriorityInput.value, 10) - 1;
+      const chosenDisplay = lastRenderedOnsiteGroups[idx];
+      if(!chosenDisplay){
+        setRouteStatus('목록 번호를 확인해 주세요 (현재 화면에 표시된 번호를 입력해야 해요)', 'warn');
+        return;
+      }
+      const chosenKey = groupKey(chosenDisplay);
+      excludeKeyFromFailed = chosenKey;
+      const chosenEntry = usable.find(c => groupKey(c.group) === chosenKey);
+      const restUsable = usable.filter(c => groupKey(c.group) !== chosenKey);
+      if(chosenEntry){
+        current = chosenEntry.coord; // continue the rest of the route from here
+        ordered = [chosenEntry.group].concat(nearestChain(restUsable));
+      }else{
+        // Chosen stop's address couldn't be geocoded -- still honor the
+        // inspector's pick by placing it first, just without it being able
+        // to anchor the distance calculation for what follows.
+        ordered = [chosenDisplay].concat(nearestChain(restUsable));
+      }
     }else{
       ordered = nearestChain(usable);
     }
-    failed.forEach(f => ordered.push(f.group));
+    // Avoid double-listing the manually chosen stop if its own geocoding had failed
+    failed.filter(f => groupKey(f.group) !== excludeKeyFromFailed).forEach(f => ordered.push(f.group));
 
     lastOptimizedOrder = ordered.map(groupKey);
     lastRouteMeta = {
@@ -1099,7 +1172,7 @@
       failedCount: failed.length, failedNames: failed.map(f=>f.group.customer)
     };
     setRouteStatus(
-      '동선 정렬 완료' + (orderMode === 'ownerFirst' ? ' (⭐ 선주입회 먼저 방문)' : '')
+      '동선 정렬 완료' + (orderMode === 'ownerFirst' ? ' (⭐ 선주입회 먼저 방문)' : orderMode === 'manual' ? ' (🔢 지정 업체 먼저 방문)' : '')
       + (failed.length ? ` · 주소 인식 실패 ${failed.length}건은 마지막에 배치됨 (${failed.map(f=>f.group.customer).join(', ')})` : '')
       + (jsKey ? '' : ' · 지도를 보려면 JavaScript 키도 입력해 주세요'),
       'ok'
@@ -1126,34 +1199,18 @@
     render();
   });
 
-  // ---------- current device location (for route start point) ----------
-  let cachedGeoPos = null; // {lat,lng}, reused for the rest of the session once granted
-  function getCurrentPositionCoords(timeoutMs){
-    if(cachedGeoPos) return Promise.resolve(cachedGeoPos);
-    return new Promise(resolve => {
-      if(!navigator.geolocation){ resolve(null); return; }
-      const timer = setTimeout(() => resolve(null), timeoutMs || 6000);
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          clearTimeout(timer);
-          cachedGeoPos = {lat: pos.coords.latitude, lng: pos.coords.longitude};
-          resolve(cachedGeoPos);
-        },
-        () => { clearTimeout(timer); resolve(null); },
-        {enableHighAccuracy: true, timeout: timeoutMs || 6000, maximumAge: 60000}
-      );
-    });
-  }
-
   // ---------- kakao map route link ----------
   // map.kakao.com/link/to/... (the previously used format) stopped reliably
   // opening route guidance on mobile web -- this is a known, widely-reported
   // Kakao issue, not an address problem. The app's own URL scheme below is
-  // the currently working replacement, but it requires an explicit start
-  // point, so we fetch the device's current GPS position for it.
-  function kakaoRouteSchemeUrls(destName, destCoord, startCoord){
-    const params = 'sp=' + startCoord.lat + ',' + startCoord.lng
-      + '&ep=' + destCoord.lat + ',' + destCoord.lng + '&by=car';
+  // the current replacement. We intentionally don't request the browser's
+  // own GPS permission for a start point: the 카카오맵 app already has its
+  // own location permission and fills "현재 위치" as the start itself when a
+  // route is opened with only a destination -- exactly like tapping 길찾기
+  // manually inside the app. Asking the *site* for location too just adds a
+  // second, often-declined permission prompt that isn't actually needed.
+  function kakaoRouteSchemeUrls(destCoord){
+    const params = 'ep=' + destCoord.lat + ',' + destCoord.lng + '&by=car';
     return {
       app: 'kakaomap://route?' + params,
       web: 'https://m.map.kakao.com/scheme/route?' + params
@@ -1162,9 +1219,9 @@
 
   async function openRoute(name, address, btn){
     const key = kakaoKeyInput.value.trim();
-    let coord = null;
+    let coord = parseLatLngOverride(address);
 
-    if(key){
+    if(!coord && key){
       if(naviGeocodeCache.has(address)){
         coord = naviGeocodeCache.get(address);
       }else{
@@ -1187,25 +1244,11 @@
       return;
     }
 
-    const origLabel = btn ? btn.textContent : '';
-    if(btn) btn.textContent = '🚗 현재 위치 확인 중…';
-    const startCoord = await getCurrentPositionCoords();
-    if(btn) btn.textContent = origLabel;
-
-    if(startCoord){
-      const urls = kakaoRouteSchemeUrls(name || address, coord, startCoord);
-      window.location.href = urls.app;
-      setTimeout(function(){
-        if(!document.hidden) window.location.href = urls.web;
-      }, 900);
-    }else{
-      // No GPS permission/support: we can't build a valid route link (the
-      // scheme requires both start and end points), so open 카카오맵 on the
-      // destination instead -- the inspector can tap 길찾기 there and choose
-      // "현재 위치" as the start manually.
-      showToast('현재 위치를 확인할 수 없어 목적지 위치만 열었어요 · 길찾기는 카카오맵 안에서 눌러주세요');
-      window.open(kakaoMapLink(address), '_blank', 'noopener');
-    }
+    const urls = kakaoRouteSchemeUrls(coord);
+    window.location.href = urls.app;
+    setTimeout(function(){
+      if(!document.hidden) window.location.href = urls.web;
+    }, 900);
   }
 
   // ---------- copy address ----------
@@ -1254,7 +1297,7 @@
       const key = editBtn.getAttribute('data-editaddr-key');
       const overrides = getAddressOverrides();
       const current = overrides[key] || key;
-      const next = window.prompt('길찾기·카카오맵·복사에 사용할 주소를 수정하세요\n(괄호 안 건물명, 회사명 등 지오코딩을 방해하는 부분을 지워보세요):', current);
+      const next = window.prompt('길찾기·카카오맵·복사에 사용할 주소를 수정하세요\n(괄호 안 건물명, 회사명 등 지오코딩을 방해하는 부분을 지워보세요)\n\n주소로 계속 안 찾아지면, 카카오맵에서 위치를 찾은 뒤 "위도,경도" 형식으로 직접 입력해도 됩니다. 예) 35.0932,128.8452', current);
       if(next !== null && next.trim()){
         overrides[key] = next.trim();
         saveAddressOverrides(overrides);
@@ -1270,6 +1313,16 @@
       const overrides = getAddressOverrides();
       delete overrides[key];
       saveAddressOverrides(overrides);
+      render();
+      return;
+    }
+    const doneBtn = e.target.closest('[data-toggle-done-key]');
+    if(doneBtn){
+      e.preventDefault();
+      const key = doneBtn.getAttribute('data-toggle-done-key');
+      if(completedKeys.has(key)) completedKeys.delete(key);
+      else completedKeys.add(key);
+      if(lastCompletedDateKey) saveCompletedForDate(lastCompletedDateKey, completedKeys);
       render();
       return;
     }
@@ -1401,6 +1454,8 @@
     const isOverridden = Object.prototype.hasOwnProperty.call(overrides, rawAddress);
     const addressForMap = effectiveAddressFor(g);
     const locTag = g.location && g.location.toLowerCase() !== 'remote' ? g.location : '';
+    const gKey = groupKey(g);
+    const isDone = completedKeys.has(gKey);
 
     let head = `
       <div class="stop-head">
@@ -1414,6 +1469,7 @@
             ${ownerCount>0 ? '<span class="tag owner">⭐ 선주입회</span>' : ''}
           </div>
         </div>
+        <button type="button" class="donebtn" data-toggle-done-key="${esc(gKey)}">${isDone ? '✅ 완료됨' : '검사 완료'}</button>
       </div>`;
 
     let actions = '';
@@ -1454,7 +1510,8 @@
 
     const remoteClass = g.remote ? ' is-remote' : '';
     const ownerClass = ownerCount > 0 ? ' has-owner' : '';
-    return `<div class="stop${remoteClass}${ownerClass}">${head}${addressLine}${actionRow}<div class="items">${itemsHtml}</div></div>`;
+    const doneClass = isDone ? ' is-done' : '';
+    return `<div class="stop${remoteClass}${ownerClass}${doneClass}">${head}${addressLine}${actionRow}<div class="items">${itemsHtml}</div></div>`;
   }
 
   function render(){
@@ -1463,6 +1520,7 @@
     summary.style.display = 'none';
     routeStrip.style.display = 'none';
     clearError();
+    lastRenderedOnsiteGroups = [];
 
     if(!lastWorkbookRows){
       emptyState.style.display = '';
@@ -1481,6 +1539,12 @@
     if(parsed.dayText || parsed.dateText){
       dateTitle.textContent = (parsed.dateText || '오늘') + ' 검사 일정';
       dateSub.textContent = (parsed.dayText ? parsed.dayText + ' · ' : '') + '검사관코드 ' + code + ' 배정 건';
+    }
+
+    const dateKey = (parsed.dateText || parsed.dayText || 'unknown') + '|' + code;
+    if(dateKey !== lastCompletedDateKey){
+      completedKeys = loadCompletedForDate(dateKey);
+      lastCompletedDateKey = dateKey;
     }
 
     const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
@@ -1515,6 +1579,8 @@
         return oa - ob;
       });
     }
+
+    lastRenderedOnsiteGroups = onsiteGroups;
 
     document.getElementById('cOnsite').textContent = onsiteGroups.length;
     document.getElementById('cRemote').textContent = remoteGroups.length;
@@ -1551,45 +1617,72 @@
     stopsList.innerHTML = html;
   }
 
+  async function processWorkbookArrayBuffer(uint8Data, displayName){
+    try{
+      const wb = XLSX.read(uint8Data, {type:'array', cellDates:false});
+      const sheetName = wb.SheetNames[0];
+      const sheet = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      lastWorkbookRows = rows;
+      lastOptimizedOrder = null;
+      lastRouteMeta = null;
+      mapPanel.style.display = 'none';
+      fileMeta.textContent = displayName;
+      fileMetaRow.style.display = '';
+      render();
+
+      const {token, gistId} = getDeviceConfig();
+      if(token && gistId){
+        setSyncStatus('업로드 중…');
+        try{
+          await pushGist(token, gistId, rows);
+          setSyncStatus('☁️ 방금 동기화됨', 'ok');
+        }catch(err){
+          setSyncStatus(err.message, 'warn');
+        }
+      }
+    }catch(err){
+      showError('파일을 읽는 중 문제가 발생했습니다: ' + err.message);
+    }
+  }
+
   fileInput.addEventListener('change', function(e){
     const file = e.target.files && e.target.files[0];
     if(!file) return;
     clearError();
     const reader = new FileReader();
-    reader.onload = async function(ev){
-      try{
-        const data = new Uint8Array(ev.target.result);
-        const wb = XLSX.read(data, {type:'array', cellDates:false});
-        const sheetName = wb.SheetNames[0];
-        const sheet = wb.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
-        lastWorkbookRows = rows;
-        lastOptimizedOrder = null;
-        lastRouteMeta = null;
-        mapPanel.style.display = 'none';
-        fileMeta.textContent = file.name;
-        fileMetaRow.style.display = '';
-        render();
-
-        const {token, gistId} = getDeviceConfig();
-        if(token && gistId){
-          setSyncStatus('업로드 중…');
-          try{
-            await pushGist(token, gistId, rows);
-            setSyncStatus('☁️ 방금 동기화됨', 'ok');
-          }catch(err){
-            setSyncStatus(err.message, 'warn');
-          }
-        }
-      }catch(err){
-        showError('파일을 읽는 중 문제가 발생했습니다: ' + err.message);
-      }
+    reader.onload = function(ev){
+      processWorkbookArrayBuffer(new Uint8Array(ev.target.result), file.name);
     };
     reader.onerror = function(){
       showError('파일을 읽지 못했습니다. 다시 시도해 주세요.');
     };
     reader.readAsArrayBuffer(file);
   });
+
+  // ---------- receiving a file shared via the OS share sheet (Android/Chrome PWA) ----------
+  // See sw.js: when this installed app is chosen from another app's "공유하기"
+  // sheet, the service worker stashes the shared file in Cache Storage and
+  // redirects here with ?shared=1, which we pick up on load.
+  const SHARE_CACHE_NAME = 'shared-workbook-cache';
+  const SHARE_CACHE_KEY = location.origin + '/shared-workbook-data';
+  async function checkForSharedFile(){
+    if(new URLSearchParams(location.search).get('shared') !== '1') return;
+    history.replaceState(null, '', location.pathname);
+    if(!('caches' in window)) return;
+    try{
+      const cache = await caches.open(SHARE_CACHE_NAME);
+      const res = await cache.match(SHARE_CACHE_KEY);
+      if(!res) return;
+      const buf = await res.arrayBuffer();
+      await cache.delete(SHARE_CACHE_KEY);
+      await processWorkbookArrayBuffer(new Uint8Array(buf), '공유받은 파일');
+    }catch(e){ /* nothing shared yet, or cache unavailable -- silently ignore */ }
+  }
+
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('./sw.js').catch(function(){ /* PWA share feature unavailable, rest of the app still works */ });
+  }
 
   codeInput.addEventListener('input', function(){
     lastOptimizedOrder = null;
@@ -1621,6 +1714,7 @@
       setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
     }
     render();
+    await checkForSharedFile();
   })();
 })();
 </script>
