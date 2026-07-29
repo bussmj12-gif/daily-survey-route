@@ -1397,6 +1397,15 @@
         const ib = orderIndex.has(groupKey(b)) ? orderIndex.get(groupKey(b)) : 999;
         return ia - ib;
       });
+    }else{
+      // Before any coordinate-based route optimization has run, still surface
+      // 선주입회 stops first by default (stable sort keeps everything else in
+      // its original workbook order).
+      onsiteGroups = onsiteGroups.slice().sort((a,b)=>{
+        const oa = a.items.some(it=>mentionsOwner(it.details)) ? 0 : 1;
+        const ob = b.items.some(it=>mentionsOwner(it.details)) ? 0 : 1;
+        return oa - ob;
+      });
     }
 
     document.getElementById('cOnsite').textContent = onsiteGroups.length;
