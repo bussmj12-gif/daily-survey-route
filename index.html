@@ -297,6 +297,16 @@
   .routestrip .node.owner-node{color:#FFD166; font-weight:800;}
   .tag.count{background:var(--bg); color:var(--ink-soft);}
 
+  .addrline{display:flex; align-items:center; gap:6px; padding:0 16px 10px; font-size:12px; color:var(--ink-soft); flex-wrap:wrap;}
+  .addrline .addrtext{flex:1 1 auto; min-width:0; overflow-wrap:anywhere;}
+  .addrline .addrbadge{
+    font-size:10px; font-weight:700; color:var(--owner); background:var(--owner-soft);
+    padding:2px 7px; border-radius:999px; flex:0 0 auto;
+  }
+  .addrbtn{
+    flex:0 0 auto; border:1px solid var(--border); background:var(--surface); border-radius:7px;
+    width:26px; height:26px; font-size:13px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
   .actionrow{display:flex; gap:8px; padding:0 16px 14px; min-width:0; flex-wrap:wrap;}
   .actionbtn{
     flex:1 1 auto; min-width:88px; display:flex; align-items:center; justify-content:center; gap:6px;
@@ -546,6 +556,7 @@
   const LS_KAKAO_KEY = 'daily-route-kakao-key';
   const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
   const LS_PLACES = 'daily-route-fixed-places';
+  const LS_ADDR_OVERRIDES = 'daily-route-address-overrides';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
@@ -729,6 +740,23 @@
     await doPull();
     render();
   });
+
+  // ---------- manual address overrides (per-inspector, this device only) ----------
+  // Keyed by the raw worksheet address text, so an override sticks across
+  // re-uploads of the same day's workbook (same customer -> same raw address
+  // string) without needing to touch the original spreadsheet.
+  function getAddressOverrides(){
+    try{ return JSON.parse(localStorage.getItem(LS_ADDR_OVERRIDES) || '{}'); }
+    catch(e){ return {}; }
+  }
+  function saveAddressOverrides(obj){
+    try{ localStorage.setItem(LS_ADDR_OVERRIDES, JSON.stringify(obj)); }catch(e){}
+  }
+  function effectiveAddressFor(g){
+    const raw = g.address || g.customer;
+    const overrides = getAddressOverrides();
+    return overrides[raw] || raw;
+  }
 
   // ---------- fixed places (home/office etc.) ----------
   function loadPlaces(){
@@ -1025,7 +1053,7 @@
 
     const coords = [];
     for(const g of groups){
-      const c = await geocodeAddress(key, g.address || g.customer);
+      const c = await geocodeAddress(key, effectiveAddressFor(g));
       coords.push({group: g, coord: c});
       done++; setRouteStatus('좌표 변환 중… (' + done + '/' + (groups.length + 1) + ')');
     }
@@ -1174,6 +1202,31 @@
       copyAddress(copyBtn.getAttribute('data-copy-address'), copyBtn);
       return;
     }
+    const editBtn = e.target.closest('[data-editaddr-key]');
+    if(editBtn){
+      e.preventDefault();
+      const key = editBtn.getAttribute('data-editaddr-key');
+      const overrides = getAddressOverrides();
+      const current = overrides[key] || key;
+      const next = window.prompt('길찾기·카카오맵·복사에 사용할 주소를 수정하세요\n(괄호 안 건물명, 회사명 등 지오코딩을 방해하는 부분을 지워보세요):', current);
+      if(next !== null && next.trim()){
+        overrides[key] = next.trim();
+        saveAddressOverrides(overrides);
+        naviGeocodeCache.delete(next.trim());
+        render();
+      }
+      return;
+    }
+    const revertBtn = e.target.closest('[data-revertaddr-key]');
+    if(revertBtn){
+      e.preventDefault();
+      const key = revertBtn.getAttribute('data-revertaddr-key');
+      const overrides = getAddressOverrides();
+      delete overrides[key];
+      saveAddressOverrides(overrides);
+      render();
+      return;
+    }
   });
 
   // ---------- excel parsing (unchanged logic) ----------
@@ -1297,7 +1350,10 @@
 
   function renderGroup(g, order){
     const ownerCount = g.items.filter(it=>mentionsOwner(it.details)).length;
-    const addressForMap = g.address || g.customer;
+    const rawAddress = g.address || g.customer;
+    const overrides = getAddressOverrides();
+    const isOverridden = Object.prototype.hasOwnProperty.call(overrides, rawAddress);
+    const addressForMap = effectiveAddressFor(g);
     const locTag = g.location && g.location.toLowerCase() !== 'remote' ? g.location : '';
 
     let head = `
@@ -1325,7 +1381,13 @@
       actions += `<a class="actionbtn call" href="tel:${uniquePhones[0]}">📞 전화하기</a>`;
     }
     const actionRow = actions ? `<div class="actionrow">${actions}</div>` : '';
-    const addressLine = g.address ? `<div style="padding:0 16px 10px; font-size:12px; color:var(--ink-soft);">${esc(g.address)}</div>` : '';
+    const addressLine = g.address ? `
+      <div class="addrline">
+        <span class="addrtext">${esc(addressForMap)}</span>
+        ${isOverridden ? '<span class="addrbadge">수정됨</span>' : ''}
+        <button type="button" class="addrbtn" data-editaddr-key="${esc(rawAddress)}" title="주소 수정">✏️</button>
+        ${isOverridden ? `<button type="button" class="addrbtn" data-revertaddr-key="${esc(rawAddress)}" title="원본 주소로 되돌리기">↺</button>` : ''}
+      </div>` : '';
 
     const itemsHtml = g.items.map(it=>{
       const showOwnPhone = uniquePhones.length !== 1 && it.phone;
