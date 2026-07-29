@@ -457,8 +457,8 @@
         <div class="fieldblock">
           <label>동선 정렬 방식</label>
           <div class="ordermode">
-            <label><input type="radio" name="orderMode" value="optimal" checked> 최단 동선</label>
-            <label><input type="radio" name="orderMode" value="ownerFirst"> ⭐ 선주입회 먼저 방문 후 나머지 최적화</label>
+            <label><input type="radio" name="orderMode" value="optimal"> 최단 동선</label>
+            <label><input type="radio" name="orderMode" value="ownerFirst" checked> ⭐ 선주입회 먼저 방문 후 나머지 최적화</label>
           </div>
         </div>
 
@@ -1054,7 +1054,7 @@
     }
 
     const orderModeEl = document.querySelector('input[name="orderMode"]:checked');
-    const orderMode = orderModeEl ? orderModeEl.value : 'optimal';
+    const orderMode = orderModeEl ? orderModeEl.value : 'ownerFirst';
     let ordered;
     if(orderMode === 'ownerFirst'){
       const ownerUsable = usable.filter(c => c.group.items.some(it => mentionsOwner(it.details)));
