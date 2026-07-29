@@ -185,6 +185,9 @@
   }
   .helptext{font-size:11.5px; color:var(--ink-faint); line-height:1.6;}
   .btnrow{display:flex; gap:8px; flex-wrap:wrap;}
+  .ordermode{display:flex; flex-direction:column; gap:8px; font-size:13px; color:var(--ink);}
+  .ordermode label{display:flex; align-items:center; gap:8px; cursor:pointer;}
+  .ordermode input[type=radio]{accent-color:var(--accent); width:16px; height:16px; flex:0 0 auto;}
   .smallbtn{
     font-size:12.5px; font-weight:700; padding:8px 12px; border-radius:8px;
     border:1.5px solid var(--border); background:var(--bg); color:var(--ink); cursor:pointer;
@@ -288,7 +291,10 @@
   }
   .tag.onsite{background:var(--accent-soft); color:var(--accent);}
   .tag.remote{background:var(--remote-soft); color:var(--remote);}
-  .tag.owner{background:var(--owner-soft); color:var(--owner);}
+  .stop.has-owner{border-color:var(--owner); box-shadow:0 0 0 2px var(--owner-soft), var(--shadow);}
+  .stop.has-owner .stampnum{border-color:var(--owner); border-style:solid; color:var(--owner);}
+  .tag.owner{background:var(--owner); color:#fff; font-weight:800; padding:4px 10px; box-shadow:0 1px 3px rgba(184,134,11,.35);}
+  .routestrip .node.owner-node{color:#FFD166; font-weight:800;}
   .tag.count{background:var(--bg); color:var(--ink-soft);}
 
   .actionrow{display:flex; gap:8px; padding:0 16px 14px; min-width:0; flex-wrap:wrap;}
@@ -445,6 +451,14 @@
           <div class="fieldblock" style="flex:1;">
             <label for="endSelect">도착지</label>
             <select id="endSelect"></select>
+          </div>
+        </div>
+
+        <div class="fieldblock">
+          <label>동선 정렬 방식</label>
+          <div class="ordermode">
+            <label><input type="radio" name="orderMode" value="optimal" checked> 최단 동선</label>
+            <label><input type="radio" name="orderMode" value="ownerFirst"> ⭐ 선주입회 먼저 방문 후 나머지 최적화</label>
           </div>
         </div>
 
@@ -1019,18 +1033,35 @@
     const usable = coords.filter(c => c.coord);
     const failed = coords.filter(c => !c.coord);
 
+    // current is captured by nearestChain and advanced as each stop is chosen,
+    // so calling it twice in sequence (owner-first mode) naturally continues
+    // the route from wherever the previous chain left off.
     let current = startCoord;
-    const remaining = usable.slice();
-    const ordered = [];
-    while(remaining.length){
-      let bestIdx = 0, bestDist = Infinity;
-      remaining.forEach((r,i)=>{
-        const d = haversineKm(current, r.coord);
-        if(d < bestDist){ bestDist = d; bestIdx = i; }
-      });
-      const chosen = remaining.splice(bestIdx,1)[0];
-      ordered.push(chosen.group);
-      current = chosen.coord;
+    function nearestChain(list){
+      const remaining = list.slice();
+      const chain = [];
+      while(remaining.length){
+        let bestIdx = 0, bestDist = Infinity;
+        remaining.forEach((r,i)=>{
+          const d = haversineKm(current, r.coord);
+          if(d < bestDist){ bestDist = d; bestIdx = i; }
+        });
+        const chosen = remaining.splice(bestIdx,1)[0];
+        chain.push(chosen.group);
+        current = chosen.coord;
+      }
+      return chain;
+    }
+
+    const orderModeEl = document.querySelector('input[name="orderMode"]:checked');
+    const orderMode = orderModeEl ? orderModeEl.value : 'optimal';
+    let ordered;
+    if(orderMode === 'ownerFirst'){
+      const ownerUsable = usable.filter(c => c.group.items.some(it => mentionsOwner(it.details)));
+      const restUsable = usable.filter(c => !c.group.items.some(it => mentionsOwner(it.details)));
+      ordered = nearestChain(ownerUsable).concat(nearestChain(restUsable));
+    }else{
+      ordered = nearestChain(usable);
     }
     failed.forEach(f => ordered.push(f.group));
 
@@ -1040,7 +1071,8 @@
       failedCount: failed.length, failedNames: failed.map(f=>f.group.customer)
     };
     setRouteStatus(
-      '동선 정렬 완료' + (failed.length ? ` · 주소 인식 실패 ${failed.length}건은 마지막에 배치됨 (${failed.map(f=>f.group.customer).join(', ')})` : '')
+      '동선 정렬 완료' + (orderMode === 'ownerFirst' ? ' (⭐ 선주입회 먼저 방문)' : '')
+      + (failed.length ? ` · 주소 인식 실패 ${failed.length}건은 마지막에 배치됨 (${failed.map(f=>f.group.customer).join(', ')})` : '')
       + (jsKey ? '' : ' · 지도를 보려면 JavaScript 키도 입력해 주세요'),
       'ok'
     );
@@ -1277,7 +1309,7 @@
             ${g.remote ? '<span class="tag remote">원격 검사</span>' : '<span class="tag onsite">방문</span>'}
             ${locTag ? `<span class="tag count">${esc(locTag)}</span>` : ''}
             ${g.items.length>1 ? `<span class="tag count">${g.items.length}건</span>` : ''}
-            ${ownerCount>0 ? '<span class="tag owner">선주입회</span>' : ''}
+            ${ownerCount>0 ? '<span class="tag owner">⭐ 선주입회</span>' : ''}
           </div>
         </div>
       </div>`;
@@ -1313,7 +1345,8 @@
     }).join('');
 
     const remoteClass = g.remote ? ' is-remote' : '';
-    return `<div class="stop${remoteClass}">${head}${addressLine}${actionRow}<div class="items">${itemsHtml}</div></div>`;
+    const ownerClass = ownerCount > 0 ? ' has-owner' : '';
+    return `<div class="stop${remoteClass}${ownerClass}">${head}${addressLine}${actionRow}<div class="items">${itemsHtml}</div></div>`;
   }
 
   function render(){
@@ -1373,7 +1406,10 @@
 
     if(lastOptimizedOrder && lastRouteMeta){
       const nodes = [`<span class="node endpoint">${esc(lastRouteMeta.startName)}</span>`]
-        .concat(onsiteGroups.map(g => `<span class="node">${esc(g.customer)}</span>`));
+        .concat(onsiteGroups.map(g => {
+          const isOwner = g.items.some(it => mentionsOwner(it.details));
+          return `<span class="node${isOwner ? ' owner-node' : ''}">${isOwner ? '⭐ ' : ''}${esc(g.customer)}</span>`;
+        }));
       if(lastRouteMeta.endName) nodes.push(`<span class="node endpoint">${esc(lastRouteMeta.endName)}</span>`);
       routeStrip.innerHTML = `
         <div class="stripline">🚗 ${nodes.join('<span class="arrow">→</span>')}</div>
