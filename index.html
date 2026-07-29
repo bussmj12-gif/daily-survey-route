@@ -503,7 +503,7 @@
   <div class="stops" id="stopsList"></div>
 
   <footer>
-    검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결) · 길찾기 버튼은 좌표 기반으로 카카오맵 경로 안내를 바로 엽니다 (REST API 키 필요) · 주소 복사 버튼으로 다른 앱에 붙여넣을 수 있습니다 · 전화번호를 누르면 바로 통화가 걸립니다.<br>
+    검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결) · 길찾기 버튼은 현재 위치 권한 허용 시 좌표 기반으로 카카오맵 경로 안내를 바로 엽니다 (REST API 키 필요) · 주소 복사 버튼으로 다른 앱에 붙여넣을 수 있습니다 · 전화번호를 누르면 바로 통화가 걸립니다.<br>
     동기화 데이터는 내 GitHub 비공개 Gist에만 저장되며, 발급한 토큰은 이 브라우저에만 보관됩니다.
   </footer>
 </div>
@@ -1126,11 +1126,38 @@
     render();
   });
 
-  // ---------- kakao map route link (no app auth required, unlike kakaonavi:// scheme) ----------
-  function kakaoRouteLink(name, coord){
-    // Opens 카카오맵 in route-guidance mode (현재위치 -> 목적지). Works via universal
-    // link (app if installed, web otherwise) without any Kakao app key/auth.
-    return 'https://map.kakao.com/link/to/' + encodeURIComponent(name) + ',' + coord.lat + ',' + coord.lng;
+  // ---------- current device location (for route start point) ----------
+  let cachedGeoPos = null; // {lat,lng}, reused for the rest of the session once granted
+  function getCurrentPositionCoords(timeoutMs){
+    if(cachedGeoPos) return Promise.resolve(cachedGeoPos);
+    return new Promise(resolve => {
+      if(!navigator.geolocation){ resolve(null); return; }
+      const timer = setTimeout(() => resolve(null), timeoutMs || 6000);
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          clearTimeout(timer);
+          cachedGeoPos = {lat: pos.coords.latitude, lng: pos.coords.longitude};
+          resolve(cachedGeoPos);
+        },
+        () => { clearTimeout(timer); resolve(null); },
+        {enableHighAccuracy: true, timeout: timeoutMs || 6000, maximumAge: 60000}
+      );
+    });
+  }
+
+  // ---------- kakao map route link ----------
+  // map.kakao.com/link/to/... (the previously used format) stopped reliably
+  // opening route guidance on mobile web -- this is a known, widely-reported
+  // Kakao issue, not an address problem. The app's own URL scheme below is
+  // the currently working replacement, but it requires an explicit start
+  // point, so we fetch the device's current GPS position for it.
+  function kakaoRouteSchemeUrls(destName, destCoord, startCoord){
+    const params = 'sp=' + startCoord.lat + ',' + startCoord.lng
+      + '&ep=' + destCoord.lat + ',' + destCoord.lng + '&by=car';
+    return {
+      app: 'kakaomap://route?' + params,
+      web: 'https://m.map.kakao.com/scheme/route?' + params
+    };
   }
 
   async function openRoute(name, address, btn){
@@ -1150,14 +1177,33 @@
       }
     }
 
-    if(coord){
-      window.open(kakaoRouteLink(name || address, coord), '_blank', 'noopener');
-    }else{
+    if(!coord){
       if(!key){
         showToast('정밀 길찾기에는 REST API 키가 필요해요 · 카카오맵 검색으로 열었어요');
       }else{
         showToast('주소 좌표를 찾지 못해 카카오맵 검색으로 열었어요');
       }
+      window.open(kakaoMapLink(address), '_blank', 'noopener');
+      return;
+    }
+
+    const origLabel = btn ? btn.textContent : '';
+    if(btn) btn.textContent = '🚗 현재 위치 확인 중…';
+    const startCoord = await getCurrentPositionCoords();
+    if(btn) btn.textContent = origLabel;
+
+    if(startCoord){
+      const urls = kakaoRouteSchemeUrls(name || address, coord, startCoord);
+      window.location.href = urls.app;
+      setTimeout(function(){
+        if(!document.hidden) window.location.href = urls.web;
+      }, 900);
+    }else{
+      // No GPS permission/support: we can't build a valid route link (the
+      // scheme requires both start and end points), so open 카카오맵 on the
+      // destination instead -- the inspector can tap 길찾기 there and choose
+      // "현재 위치" as the start manually.
+      showToast('현재 위치를 확인할 수 없어 목적지 위치만 열었어요 · 길찾기는 카카오맵 안에서 눌러주세요');
       window.open(kakaoMapLink(address), '_blank', 'noopener');
     }
   }
