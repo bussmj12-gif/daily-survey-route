@@ -297,6 +297,7 @@
   .stop.has-owner{border-color:var(--owner); box-shadow:0 0 0 2px var(--owner-soft), var(--shadow);}
   .stop.has-owner .stampnum{border-color:var(--owner); border-style:solid; color:var(--owner);}
   .tag.owner{background:var(--owner); color:#fff; font-weight:800; padding:4px 10px; box-shadow:0 1px 3px rgba(184,134,11,.35);}
+  .tag.manual{background:#E4E9FF; color:#3B4FCC;}
   .routestrip .node.owner-node{color:#FFD166; font-weight:800;}
   .tag.count{background:var(--bg); color:var(--ink-soft);}
 
@@ -508,6 +509,25 @@
     <div class="chip owner"><div class="num" id="cOwner">0</div><div class="lbl">선주입회</div></div>
   </div>
 
+  <div id="addStopBar" style="margin-top:12px;">
+    <button type="button" class="smallbtn" id="showAddStopBtn">➕ 방문지 추가</button>
+    <div id="addStopForm" style="display:none; margin-top:8px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow);">
+      <div class="fieldblock">
+        <label for="addStopName">업체명</label>
+        <input type="text" id="addStopName" placeholder="예: 긴급 추가 업체">
+      </div>
+      <div class="fieldblock" style="margin-top:8px;">
+        <label for="addStopAddress">주소</label>
+        <input type="text" id="addStopAddress" placeholder="주소 입력">
+      </div>
+      <p class="helptext" style="margin-top:6px;">직접 추가한 방문지는 지우기 전까지 매일 목록에 계속 남아있어요. 하루만 필요하면 다녀온 뒤 카드에서 삭제해 주세요.</p>
+      <div class="btnrow" style="margin-top:10px;">
+        <button type="button" class="smallbtn primary" id="confirmAddStopBtn">추가</button>
+        <button type="button" class="smallbtn" id="cancelAddStopBtn">취소</button>
+      </div>
+    </div>
+  </div>
+
   <div class="empty" id="emptyState">
     <div class="icon">🗂️</div>
     <h3>업무 배정 엑셀을 올려주세요</h3>
@@ -565,6 +585,12 @@
   const routeStatus = document.getElementById('routeStatus');
   const manualPriorityRow = document.getElementById('manualPriorityRow');
   const manualPriorityInput = document.getElementById('manualPriorityInput');
+  const showAddStopBtn = document.getElementById('showAddStopBtn');
+  const addStopForm = document.getElementById('addStopForm');
+  const addStopName = document.getElementById('addStopName');
+  const addStopAddress = document.getElementById('addStopAddress');
+  const confirmAddStopBtn = document.getElementById('confirmAddStopBtn');
+  const cancelAddStopBtn = document.getElementById('cancelAddStopBtn');
   const routeStrip = document.getElementById('routeStrip');
   const mapPanel = document.getElementById('mapPanel');
 
@@ -576,6 +602,7 @@
   const LS_PLACES = 'daily-route-fixed-places';
   const LS_ADDR_OVERRIDES = 'daily-route-address-overrides';
   const LS_COMPLETED = 'daily-route-completed';
+  const LS_MANUAL_STOPS = 'daily-route-manual-stops';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
@@ -856,6 +883,26 @@
     renderPlaceSelects();
   });
 
+  showAddStopBtn.addEventListener('click', function(){
+    addStopForm.style.display = addStopForm.style.display === 'none' ? '' : 'none';
+    if(addStopForm.style.display !== 'none') addStopName.focus();
+  });
+  cancelAddStopBtn.addEventListener('click', function(){
+    addStopForm.style.display = 'none';
+    addStopName.value = ''; addStopAddress.value = '';
+  });
+  confirmAddStopBtn.addEventListener('click', function(){
+    const name = addStopName.value.trim();
+    const address = addStopAddress.value.trim();
+    if(!name || !address){ addStopName.focus(); return; }
+    const stops = loadManualStops();
+    stops.push({id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2,6), customer: name, address});
+    saveManualStops(stops);
+    addStopName.value = ''; addStopAddress.value = '';
+    addStopForm.style.display = 'none';
+    render();
+  });
+
   // ---------- route optimization (Kakao geocoding + nearest-neighbor) ----------
   function setRouteStatus(text, kind){
     routeStatus.textContent = text;
@@ -1090,8 +1137,9 @@
     try{ parsed = parseWorkbook(lastWorkbookRows); }
     catch(e){ setRouteStatus(e.message, 'warn'); return; }
     const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
-    const groups = groupItems(mine).filter(g => !g.remote);
-    if(groups.length === 0){ setRouteStatus('최적화할 방문 지점이 없습니다', 'warn'); return; }
+    const groups = buildOnsiteAndRemoteGroups(mine, code).onsite
+      .filter(g => !completedKeys.has(groupKey(g)));
+    if(groups.length === 0){ setRouteStatus('최적화할 방문 지점이 없습니다 (완료 처리된 곳은 제외됩니다)', 'warn'); return; }
 
     setRouteStatus('좌표 변환 중… (0/' + (groups.length + 1) + ')');
     let done = 0;
@@ -1146,6 +1194,10 @@
       const chosenDisplay = lastRenderedOnsiteGroups[idx];
       if(!chosenDisplay){
         setRouteStatus('목록 번호를 확인해 주세요 (현재 화면에 표시된 번호를 입력해야 해요)', 'warn');
+        return;
+      }
+      if(completedKeys.has(groupKey(chosenDisplay))){
+        setRouteStatus('완료 처리된 업체는 우선권으로 지정할 수 없어요 (완료 취소 후 다시 시도해 주세요)', 'warn');
         return;
       }
       const chosenKey = groupKey(chosenDisplay);
@@ -1327,6 +1379,16 @@
       render();
       return;
     }
+    const deleteManualBtn = e.target.closest('[data-delete-manual-key]');
+    if(deleteManualBtn){
+      e.preventDefault();
+      const id = deleteManualBtn.getAttribute('data-delete-manual-key');
+      if(window.confirm('이 직접 추가한 방문지를 삭제할까요?')){
+        saveManualStops(loadManualStops().filter(ms => ms.id !== id));
+        render();
+      }
+      return;
+    }
   });
 
   // ---------- excel parsing (unchanged logic) ----------
@@ -1444,6 +1506,42 @@
     return groups;
   }
 
+  // Manually added stops (see "➕ 방문지 추가") aren't tied to any date and
+  // persist until the inspector who added them explicitly deletes one -- they
+  // are NOT part of the uploaded workbook, so they survive new-day uploads.
+  function loadManualStops(){
+    try{ return JSON.parse(localStorage.getItem(LS_MANUAL_STOPS) || '[]'); }
+    catch(e){ return []; }
+  }
+  function saveManualStops(arr){
+    try{ localStorage.setItem(LS_MANUAL_STOPS, JSON.stringify(arr)); }catch(e){}
+  }
+  function manualStopToGroup(ms, code){
+    return {
+      customer: ms.customer,
+      location: '직접추가',
+      address: ms.address,
+      remote: false,
+      isManual: true,
+      manualId: ms.id,
+      items: [{
+        id: '', project: '', customer: ms.customer, location: '직접추가', address: ms.address,
+        phone: ms.phone || '', asset: '직접 추가한 방문지', intended: '', details: '', surveyor: code
+      }]
+    };
+  }
+  // Combines workbook-derived groups with manually added stops into one
+  // {onsite, remote} result, so both render() and the route optimizer stay
+  // in sync without duplicating this merge logic.
+  function buildOnsiteAndRemoteGroups(mine, code){
+    const groups = groupItems(mine);
+    const manualGroups = loadManualStops().map(ms => manualStopToGroup(ms, code));
+    return {
+      onsite: groups.filter(g => !g.remote).concat(manualGroups),
+      remote: groups.filter(g => g.remote)
+    };
+  }
+
   function kakaoMapLink(query){
     return 'https://map.kakao.com/link/search/' + encodeURIComponent(query);
   }
@@ -1454,7 +1552,7 @@
     const overrides = getAddressOverrides();
     const isOverridden = Object.prototype.hasOwnProperty.call(overrides, rawAddress);
     const addressForMap = effectiveAddressFor(g);
-    const locTag = g.location && g.location.toLowerCase() !== 'remote' ? g.location : '';
+    const locTag = (g.location && g.location.toLowerCase() !== 'remote' && !g.isManual) ? g.location : '';
     const gKey = groupKey(g);
     const isDone = completedKeys.has(gKey);
 
@@ -1465,12 +1563,16 @@
           <p class="customer">${esc(g.customer)}</p>
           <div class="tagrow">
             ${g.remote ? '<span class="tag remote">원격 검사</span>' : '<span class="tag onsite">방문</span>'}
+            ${g.isManual ? '<span class="tag manual">🔧 직접 추가</span>' : ''}
             ${locTag ? `<span class="tag count">${esc(locTag)}</span>` : ''}
             ${g.items.length>1 ? `<span class="tag count">${g.items.length}건</span>` : ''}
             ${ownerCount>0 ? '<span class="tag owner">⭐ 선주입회</span>' : ''}
           </div>
         </div>
-        <button type="button" class="donebtn" data-toggle-done-key="${esc(gKey)}">${isDone ? '✅ 완료됨' : '검사 완료'}</button>
+        <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+          <button type="button" class="donebtn" data-toggle-done-key="${esc(gKey)}">${isDone ? '✅ 완료됨' : '검사 완료'}</button>
+          ${g.isManual ? `<button type="button" class="donebtn" data-delete-manual-key="${esc(g.manualId)}" style="color:var(--danger); border-color:#F1C4B8;">🗑️ 삭제</button>` : ''}
+        </div>
       </div>`;
 
     let actions = '';
@@ -1558,10 +1660,10 @@
 
     emptyState.style.display = 'none';
 
-    const groups = groupItems(mine);
-    let onsiteGroups = groups.filter(g=>!g.remote);
-    const remoteGroups = groups.filter(g=>g.remote);
-    const ownerGroupCount = groups.filter(g=>g.items.some(it=>mentionsOwner(it.details))).length;
+    const merged = buildOnsiteAndRemoteGroups(mine, code);
+    let onsiteGroups = merged.onsite;
+    const remoteGroups = merged.remote;
+    const ownerGroupCount = onsiteGroups.concat(remoteGroups).filter(g=>g.items.some(it=>mentionsOwner(it.details))).length;
 
     if(lastOptimizedOrder){
       const orderIndex = new Map(lastOptimizedOrder.map((k,i)=>[k,i]));
