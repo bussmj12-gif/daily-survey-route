@@ -1137,8 +1137,29 @@
     try{ parsed = parseWorkbook(lastWorkbookRows); }
     catch(e){ setRouteStatus(e.message, 'warn'); return; }
     const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
-    const groups = buildOnsiteAndRemoteGroups(mine, code).onsite
-      .filter(g => !completedKeys.has(groupKey(g)));
+    const allOnsite = buildOnsiteAndRemoteGroups(mine, code).onsite;
+
+    const orderModeEl = document.querySelector('input[name="orderMode"]:checked');
+    const orderMode = orderModeEl ? orderModeEl.value : 'ownerFirst';
+
+    // In "검사관 지정 우선권" mode the chosen stop is allowed even if it was
+    // marked 완료 (완료 처리 just means "already visited", not "never go
+    // there again" -- the inspector may deliberately want to route back).
+    // Every OTHER completed stop still gets excluded from the route below.
+    let manualChosenKey = null;
+    let manualChosenGroup = null;
+    if(orderMode === 'manual'){
+      const idx = parseInt(manualPriorityInput.value, 10) - 1;
+      const chosenDisplay = lastRenderedOnsiteGroups[idx];
+      if(!chosenDisplay){
+        setRouteStatus('목록 번호를 확인해 주세요 (현재 화면에 표시된 번호를 입력해야 해요)', 'warn');
+        return;
+      }
+      manualChosenKey = groupKey(chosenDisplay);
+      manualChosenGroup = chosenDisplay;
+    }
+
+    const groups = allOnsite.filter(g => !completedKeys.has(groupKey(g)) || groupKey(g) === manualChosenKey);
     if(groups.length === 0){ setRouteStatus('최적화할 방문 지점이 없습니다 (완료 처리된 곳은 제외됩니다)', 'warn'); return; }
 
     setRouteStatus('좌표 변환 중… (0/' + (groups.length + 1) + ')');
@@ -1181,8 +1202,6 @@
       return chain;
     }
 
-    const orderModeEl = document.querySelector('input[name="orderMode"]:checked');
-    const orderMode = orderModeEl ? orderModeEl.value : 'ownerFirst';
     let ordered;
     let excludeKeyFromFailed = null;
     if(orderMode === 'ownerFirst'){
@@ -1190,17 +1209,7 @@
       const restUsable = usable.filter(c => !c.group.items.some(it => mentionsOwner(it.details)));
       ordered = nearestChain(ownerUsable).concat(nearestChain(restUsable));
     }else if(orderMode === 'manual'){
-      const idx = parseInt(manualPriorityInput.value, 10) - 1;
-      const chosenDisplay = lastRenderedOnsiteGroups[idx];
-      if(!chosenDisplay){
-        setRouteStatus('목록 번호를 확인해 주세요 (현재 화면에 표시된 번호를 입력해야 해요)', 'warn');
-        return;
-      }
-      if(completedKeys.has(groupKey(chosenDisplay))){
-        setRouteStatus('완료 처리된 업체는 우선권으로 지정할 수 없어요 (완료 취소 후 다시 시도해 주세요)', 'warn');
-        return;
-      }
-      const chosenKey = groupKey(chosenDisplay);
+      const chosenKey = manualChosenKey;
       excludeKeyFromFailed = chosenKey;
       const chosenEntry = usable.find(c => groupKey(c.group) === chosenKey);
       const restUsable = usable.filter(c => groupKey(c.group) !== chosenKey);
@@ -1211,7 +1220,7 @@
         // Chosen stop's address couldn't be geocoded -- still honor the
         // inspector's pick by placing it first, just without it being able
         // to anchor the distance calculation for what follows.
-        ordered = [chosenDisplay].concat(nearestChain(restUsable));
+        ordered = [manualChosenGroup].concat(nearestChain(restUsable));
       }
     }else{
       ordered = nearestChain(usable);
