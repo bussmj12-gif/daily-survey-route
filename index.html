@@ -114,6 +114,7 @@
     width:100%;
   }
   input#codeInput{width:84px; text-transform:uppercase;}
+  .maskedinput{-webkit-text-security:disc;}
   input:focus{outline:none;border-color:var(--accent);}
   .filebtn{
     flex:1;
@@ -404,7 +405,7 @@
         </p>
         <div class="fieldblock">
           <label for="tokenInput">GitHub 토큰 (gist 권한)</label>
-          <input type="password" id="tokenInput" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off">
+          <input type="text" inputmode="text" class="maskedinput" id="tokenInput" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off" spellcheck="false">
         </div>
         <div class="fieldblock">
           <label for="gistInput">Gist ID</label>
@@ -445,11 +446,11 @@
         </p>
         <div class="fieldblock">
           <label for="kakaoKeyInput">카카오 REST API 키</label>
-          <input type="password" id="kakaoKeyInput" placeholder="카카오 디벨로퍼스에서 발급받은 REST API 키" autocomplete="off">
+          <input type="text" inputmode="text" class="maskedinput" id="kakaoKeyInput" placeholder="카카오 디벨로퍼스에서 발급받은 REST API 키" autocomplete="off" spellcheck="false">
         </div>
         <div class="fieldblock">
           <label for="kakaoJsKeyInput">카카오 JavaScript 키 (지도 표시용, 선택)</label>
-          <input type="password" id="kakaoJsKeyInput" placeholder="같은 앱의 플랫폼 키 > JavaScript 키" autocomplete="off">
+          <input type="text" inputmode="text" class="maskedinput" id="kakaoJsKeyInput" placeholder="같은 앱의 플랫폼 키 > JavaScript 키" autocomplete="off" spellcheck="false">
         </div>
 
         <div class="fieldblock">
