@@ -1581,7 +1581,7 @@
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-          <button type="button" class="donebtn" data-toggle-done-key="${esc(gKey)}">${isDone ? '✅ 완료됨' : '검사 완료'}</button>
+          <button type="button" class="donebtn" data-toggle-done-key="${esc(gKey)}">${isDone ? '✅ 완료됨' : '검사전'}</button>
           ${g.isManual ? `<button type="button" class="donebtn" data-delete-manual-key="${esc(g.manualId)}" style="color:var(--danger); border-color:#F1C4B8;">🗑️ 삭제</button>` : ''}
         </div>
       </div>`;
