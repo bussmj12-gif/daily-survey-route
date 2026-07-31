@@ -221,6 +221,14 @@
     border-radius:8px; width:100%; color:var(--ink); background:#fff;
   }
 
+  .stagingbanner{
+    margin-top:14px; background:linear-gradient(135deg,#FFF3E6,#FFE7D6); border:1.5px solid var(--accent);
+    border-radius:14px; padding:14px 16px; box-shadow:var(--shadow);
+  }
+  .stagingbanner .sb-title{font-weight:800; font-size:14.5px; color:#B8480A; margin:0 0 4px;}
+  .stagingbanner .sb-sub{font-size:12px; color:var(--ink-soft); margin:0 0 10px;}
+  .stagingbanner .btnrow{display:flex; gap:8px;}
+
   .routestrip{
     margin-top:14px; background:var(--ink); color:#fff; border-radius:12px;
     padding:12px 14px; font-size:12.5px; line-height:1.7;
@@ -498,6 +506,8 @@
     </details>
   </div>
 
+  <div id="stagingBanner" style="display:none;"></div>
+
   <div class="routestrip" id="routeStrip" style="display:none;"></div>
   <div class="mappanel" id="mapPanel" style="display:none;">
     <div id="mapCanvas"></div>
@@ -592,11 +602,13 @@
   const confirmAddStopBtn = document.getElementById('confirmAddStopBtn');
   const cancelAddStopBtn = document.getElementById('cancelAddStopBtn');
   const routeStrip = document.getElementById('routeStrip');
+  const stagingBanner = document.getElementById('stagingBanner');
   const mapPanel = document.getElementById('mapPanel');
 
   const LS_TOKEN = 'daily-route-gh-token';
   const LS_GIST = 'daily-route-gh-gist';
   const GIST_FILENAME = 'route-data.json';
+  const STAGING_FILENAME = 'staging-data.json';
   const LS_KAKAO_KEY = 'daily-route-kakao-key';
   const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
   const LS_SURVEYOR_CODE = 'daily-route-surveyor-code';
@@ -708,6 +720,20 @@
     return JSON.parse(file.content);
   }
 
+  // Generic version used for the staging file: returns null instead of
+  // throwing when the file doesn't exist yet (e.g. the Gmail script hasn't
+  // run yet, or this inspector hasn't set the automation up at all).
+  async function pullGistFile(token, gistId, filename){
+    const headers = {'Accept':'application/vnd.github+json'};
+    if(token) headers['Authorization'] = 'token ' + token;
+    const res = await fetch('https://api.github.com/gists/' + gistId, {headers});
+    if(!res.ok) return null;
+    const data = await res.json();
+    const file = data.files && data.files[filename];
+    if(!file || !file.content) return null;
+    try{ return JSON.parse(file.content); }catch(e){ return null; }
+  }
+
   function showSyncCode(token, gistId){
     const code = token + '::' + gistId;
     syncCodeText.textContent = code;
@@ -790,7 +816,81 @@
     setSyncStatus('불러오는 중…');
     await doPull();
     render();
+    await checkStagingWorkbook();
   });
+
+  // ---------- staging banner ("📩 N월 N일자 워크북이 도착했어요") ----------
+  // The Gmail Apps Script (run independently by each inspector, see setup
+  // guide) writes the freshly-arrived workbook to this inspector's own Gist
+  // under a separate file, WITHOUT touching the active route-data.json. It
+  // only becomes the active data once the inspector taps "적용하기" here --
+  // this is the manual approval step, so a bad/garbled email never silently
+  // overwrites today's working list.
+  const LS_STAGING_SEEN = 'daily-route-staging-seen'; // last stagedAt we've already shown/applied, so we don't re-nag every reload
+  let pendingStaging = null;
+
+  function renderStagingBanner(){
+    if(!pendingStaging){
+      stagingBanner.style.display = 'none';
+      stagingBanner.innerHTML = '';
+      return;
+    }
+    const label = pendingStaging.dateText ? (pendingStaging.dateText + '자') : '새';
+    stagingBanner.innerHTML = `
+      <div class="stagingbanner">
+        <p class="sb-title">📩 ${esc(label)} 워크북이 도착했어요</p>
+        <p class="sb-sub">적용하기를 누르기 전까지 지금 보고 있는 목록은 그대로 유지돼요.</p>
+        <div class="btnrow">
+          <button type="button" class="smallbtn primary" id="applyStagingBtn">✅ 적용하기</button>
+          <button type="button" class="smallbtn" id="dismissStagingBtn">나중에</button>
+        </div>
+      </div>`;
+    stagingBanner.style.display = '';
+    document.getElementById('applyStagingBtn').addEventListener('click', applyStagingWorkbook);
+    document.getElementById('dismissStagingBtn').addEventListener('click', function(){
+      try{ localStorage.setItem(LS_STAGING_SEEN, pendingStaging.stagedAt || ''); }catch(e){}
+      pendingStaging = null;
+      renderStagingBanner();
+    });
+  }
+
+  async function checkStagingWorkbook(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    try{
+      const staging = await pullGistFile(token, gistId, STAGING_FILENAME);
+      if(!staging || !staging.rows || !staging.stagedAt) return;
+      const seen = localStorage.getItem(LS_STAGING_SEEN);
+      if(seen === staging.stagedAt) return; // already applied or dismissed this exact batch
+      pendingStaging = staging;
+      renderStagingBanner();
+    }catch(e){ /* staging file just doesn't exist yet for this inspector -- fine */ }
+  }
+
+  async function applyStagingWorkbook(){
+    if(!pendingStaging) return;
+    const rows = pendingStaging.rows;
+    const stagedAt = pendingStaging.stagedAt;
+    lastWorkbookRows = rows;
+    lastOptimizedOrder = null;
+    lastRouteMeta = null;
+    mapPanel.style.display = 'none';
+    render();
+    try{ localStorage.setItem(LS_STAGING_SEEN, stagedAt); }catch(e){}
+    pendingStaging = null;
+    renderStagingBanner();
+
+    const {token, gistId} = getDeviceConfig();
+    if(token && gistId){
+      setSyncStatus('업로드 중…');
+      try{
+        await pushGist(token, gistId, rows);
+        setSyncStatus('☁️ 방금 동기화됨', 'ok');
+      }catch(err){
+        setSyncStatus(err.message, 'warn');
+      }
+    }
+  }
 
   // ---------- manual address overrides (per-inspector, this device only) ----------
   // Keyed by the raw worksheet address text, so an override sticks across
@@ -1830,6 +1930,7 @@
     }
     render();
     await checkForSharedFile();
+    await checkStagingWorkbook();
   })();
 })();
 </script>
