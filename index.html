@@ -1576,16 +1576,19 @@
   // tied to the SURVEYOR/LOCATION header the item table uses.
   function extractSurveyorNotes(rows){
     const map = {};
-    const lineRe = /^([A-Za-z\/\s]{2,40}?)\s*:\s*(.+)$/;
+    // Korean IMEs sometimes turn a typed ":" or "/" into the full-width
+    // equivalent (："，／) depending on autocomplete settings, so normalize
+    // those to the plain ASCII versions before matching.
+    const lineRe = /^([A-Za-z／\/\s]{2,40}?)\s*[：:]\s*(.+)$/;
     rows.forEach(row=>{
       (row||[]).forEach(cell=>{
-        const s = cleanCell(cell);
+        let s = cleanCell(cell);
         if(!s) return;
         const m = s.match(lineRe);
         if(!m) return;
         const note = m[2].trim();
         if(!note) return;
-        m[1].split('/').forEach(tok=>{
+        m[1].split(/[／\/]/).forEach(tok=>{
           const code = tok.trim().toUpperCase();
           if(/^[A-Z]{2,6}$/.test(code)) map[code] = note;
         });
