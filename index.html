@@ -1627,8 +1627,15 @@
   // switching 검사관코드 on the same device -- or another inspector's device
   // -- never shows someone else's manually added stops.
   function loadAllManualStops(){
-    try{ return JSON.parse(localStorage.getItem(LS_MANUAL_STOPS) || '{}'); }
-    catch(e){ return {}; }
+    try{
+      const parsed = JSON.parse(localStorage.getItem(LS_MANUAL_STOPS) || '{}');
+      // Older app versions stored this as a flat array (not scoped per
+      // 검사관코드). Silently keeping that shape would make saveAllManualStops
+      // lose every write (JSON.stringify on an array drops non-index keys),
+      // so treat anything that isn't a plain object as empty and start fresh.
+      if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      return parsed;
+    }catch(e){ return {}; }
   }
   function saveAllManualStops(byCode){
     try{ localStorage.setItem(LS_MANUAL_STOPS, JSON.stringify(byCode)); }catch(e){}
