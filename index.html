@@ -531,6 +531,7 @@
 
   <div id="addStopBar" style="margin-top:12px;">
     <button type="button" class="smallbtn" id="showAddStopBtn">➕ 방문지 추가</button>
+    <button type="button" class="smallbtn" id="resyncStopsBtn" title="이 기기의 방문지 목록을 클라우드에 강제로 다시 업로드합니다">☁️ 방문지 재동기화</button>
     <div id="addStopForm" style="display:none; margin-top:8px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow);">
       <div class="fieldblock">
         <label for="addStopName">업체명</label>
@@ -606,6 +607,7 @@
   const manualPriorityRow = document.getElementById('manualPriorityRow');
   const manualPriorityInput = document.getElementById('manualPriorityInput');
   const showAddStopBtn = document.getElementById('showAddStopBtn');
+  const resyncStopsBtn = document.getElementById('resyncStopsBtn');
   const addStopForm = document.getElementById('addStopForm');
   const addStopName = document.getElementById('addStopName');
   const addStopAddress = document.getElementById('addStopAddress');
@@ -1028,6 +1030,15 @@
   showAddStopBtn.addEventListener('click', function(){
     addStopForm.style.display = addStopForm.style.display === 'none' ? '' : 'none';
     if(addStopForm.style.display !== 'none') addStopName.focus();
+  });
+  resyncStopsBtn.addEventListener('click', async function(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId){ showToast('먼저 ⚙ 동기화 설정을 완료해 주세요'); return; }
+    const origLabel = resyncStopsBtn.textContent;
+    resyncStopsBtn.textContent = '☁️ 업로드 중…';
+    await pushManualStopsToGist();
+    resyncStopsBtn.textContent = origLabel;
+    showToast('이 기기의 방문지를 클라우드에 다시 올렸어요');
   });
   cancelAddStopBtn.addEventListener('click', function(){
     addStopForm.style.display = 'none';
