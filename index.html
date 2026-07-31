@@ -620,6 +620,7 @@
   const LS_GIST = 'daily-route-gh-gist';
   const GIST_FILENAME = 'route-data.json';
   const STAGING_FILENAME = 'staging-data.json';
+  const MANUAL_STOPS_FILENAME = 'manual-stops.json';
   const LS_KAKAO_KEY = 'daily-route-kakao-key';
   const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
   const LS_SURVEYOR_CODE = 'daily-route-surveyor-code';
@@ -745,6 +746,33 @@
     try{ return JSON.parse(file.content); }catch(e){ return null; }
   }
 
+  // ---------- syncing "직접 추가한 방문지" across an inspector's own devices ----------
+  // Mirrors the whole per-code manual-stops object to/from the Gist, the same
+  // way route-data.json already syncs the workbook. Last write wins -- fine
+  // for one inspector using their phone and computer at different times, not
+  // meant for simultaneous concurrent edits on two devices at once.
+  async function pushManualStopsToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({
+          files: { [MANUAL_STOPS_FILENAME]: { content: JSON.stringify(loadAllManualStops()) } }
+        })
+      });
+    }catch(e){ /* best-effort -- the stop is still saved locally either way */ }
+  }
+  async function pullManualStopsFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, MANUAL_STOPS_FILENAME);
+    if(data && typeof data === 'object' && !Array.isArray(data)){
+      saveAllManualStops(data);
+    }
+  }
+
   function showSyncCode(token, gistId){
     const code = token + '::' + gistId;
     syncCodeText.textContent = code;
@@ -826,6 +854,7 @@
   syncBtn.addEventListener('click', async function(){
     setSyncStatus('불러오는 중…');
     await doPull();
+    await pullManualStopsFromGist();
     render();
     await checkStagingWorkbook();
   });
@@ -1016,6 +1045,7 @@
     addStopName.value = ''; addStopAddress.value = '';
     addStopForm.style.display = 'none';
     render();
+    pushManualStopsToGist();
   });
 
   // ---------- route optimization (Kakao geocoding + nearest-neighbor) ----------
@@ -1511,6 +1541,7 @@
       if(window.confirm('이 직접 추가한 방문지를 삭제할까요?')){
         saveManualStops(code, loadManualStops(code).filter(ms => ms.id !== id));
         render();
+        pushManualStopsToGist();
       }
       return;
     }
@@ -1574,24 +1605,33 @@
   // Multiple codes can share one note when separated by "/". We scan every
   // cell in the sheet (not just the main item rows) since this block isn't
   // tied to the SURVEYOR/LOCATION header the item table uses.
+  // The workbook's per-surveyor summary block often lives in a SINGLE cell
+  // that visually looks like a multi-column grid but is really one long
+  // string, with each "CODE(s) : note" entry separated only by runs of
+  // spaces (column padding) or newlines -- not actual cell boundaries. So we
+  // can't treat "one cell = one entry"; instead we find every "CODE(s):"
+  // occurrence in the whole cell and treat the text between one occurrence
+  // and the next as that entry's note.
   function extractSurveyorNotes(rows){
     const map = {};
-    // Korean IMEs sometimes turn a typed ":" or "/" into the full-width
-    // equivalent (："，／) depending on autocomplete settings, so normalize
-    // those to the plain ASCII versions before matching.
-    const lineRe = /^([A-Za-z／\/\s]{2,40}?)\s*[：:]\s*(.+)$/;
+    const entryRe = /([A-Za-z]{2,6}(?:\s*[／\/]\s*[A-Za-z]{2,6})*)\s*[：:]\s*/g;
     rows.forEach(row=>{
       (row||[]).forEach(cell=>{
-        let s = cleanCell(cell);
+        const s = cleanCell(cell);
         if(!s) return;
-        const m = s.match(lineRe);
-        if(!m) return;
-        const note = m[2].trim();
-        if(!note) return;
-        m[1].split(/[／\/]/).forEach(tok=>{
-          const code = tok.trim().toUpperCase();
-          if(/^[A-Z]{2,6}$/.test(code)) map[code] = note;
-        });
+        const matches = [...s.matchAll(entryRe)];
+        for(let i=0; i<matches.length; i++){
+          const m = matches[i];
+          const codesPart = m[1];
+          const noteStart = m.index + m[0].length;
+          const noteEnd = (i+1 < matches.length) ? matches[i+1].index : s.length;
+          const note = s.slice(noteStart, noteEnd).trim();
+          if(!note) continue;
+          codesPart.split(/[／\/]/).forEach(tok=>{
+            const code = tok.trim().toUpperCase();
+            if(/^[A-Z]{2,6}$/.test(code)) map[code] = note;
+          });
+        }
       });
     });
     return map;
@@ -2002,6 +2042,7 @@
     if(token && gistId){
       setSyncStatus('불러오는 중…');
       await doPull();
+      await pullManualStopsFromGist();
     }else{
       setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
     }
