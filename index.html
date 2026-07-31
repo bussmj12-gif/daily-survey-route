@@ -255,6 +255,14 @@
   .map-pin.start{background:var(--accent); color:#fff;}
   .map-pin.end{background:var(--remote); color:#fff;}
 
+  .statusflag{
+    margin-top:14px; display:flex; align-items:center; gap:8px; padding:12px 14px;
+    border-radius:12px; font-size:13.5px; font-weight:700; box-shadow:var(--shadow);
+  }
+  .statusflag.es{background:#E4E9FF; color:#3B4FCC; border:1px solid #C7D0FF;}
+  .statusflag.leave{background:#FFF3E6; color:#B8480A; border:1px solid #F3C7A2;}
+  .statusflag + .statusflag{margin-top:8px;}
+
   .summary{display:flex; gap:8px; margin-top:14px;}
   .summary .chip{
     flex:1; background:var(--surface); border:1px solid var(--border); border-radius:11px;
@@ -513,6 +521,8 @@
     <div id="mapCanvas"></div>
   </div>
 
+  <div id="statusFlags"></div>
+
   <div class="summary" id="summary" style="display:none;">
     <div class="chip onsite"><div class="num" id="cOnsite">0</div><div class="lbl">방문 지점</div></div>
     <div class="chip remote"><div class="num" id="cRemote">0</div><div class="lbl">원격 검사</div></div>
@@ -603,6 +613,7 @@
   const cancelAddStopBtn = document.getElementById('cancelAddStopBtn');
   const routeStrip = document.getElementById('routeStrip');
   const stagingBanner = document.getElementById('stagingBanner');
+  const statusFlagsEl = document.getElementById('statusFlags');
   const mapPanel = document.getElementById('mapPanel');
 
   const LS_TOKEN = 'daily-route-gh-token';
@@ -1557,6 +1568,32 @@
   // block uses SHIP NAME / SURVEY ITEM / REMARK instead of CUSTOMER / ASSET
   // CATEGORY / REQUESTDETAILS). We re-detect the header whenever one appears,
   // instead of assuming a single fixed header for the whole sheet.
+  // The workbook usually has a summary block near the bottom listing each
+  // surveyor's day at a glance, e.g. "GHK / SWL / IHJ / SMJ : ES" or
+  // "SCK : A/Leave" or ordinary location lists like "SMJ : 지사4, 녹산2".
+  // Multiple codes can share one note when separated by "/". We scan every
+  // cell in the sheet (not just the main item rows) since this block isn't
+  // tied to the SURVEYOR/LOCATION header the item table uses.
+  function extractSurveyorNotes(rows){
+    const map = {};
+    const lineRe = /^([A-Za-z\/\s]{2,40}?)\s*:\s*(.+)$/;
+    rows.forEach(row=>{
+      (row||[]).forEach(cell=>{
+        const s = cleanCell(cell);
+        if(!s) return;
+        const m = s.match(lineRe);
+        if(!m) return;
+        const note = m[2].trim();
+        if(!note) return;
+        m[1].split('/').forEach(tok=>{
+          const code = tok.trim().toUpperCase();
+          if(/^[A-Z]{2,6}$/.test(code)) map[code] = note;
+        });
+      });
+    });
+    return map;
+  }
+
   function parseWorkbook(rows){
     let idx = null;
     let dayText = '', dateText = '';
@@ -1601,7 +1638,7 @@
     if(!idx){
       throw new Error('시트에서 SURVEYOR / LOCATION 헤더를 찾지 못했습니다. 원본 WORK BOOK 형식인지 확인해 주세요.');
     }
-    return {items: out, dayText, dateText};
+    return {items: out, dayText, dateText, surveyorNotes: extractSurveyorNotes(rows)};
   }
 
   function groupItems(items){
@@ -1756,6 +1793,7 @@
     summary.style.display = 'none';
     routeStrip.style.display = 'none';
     clearError();
+    statusFlagsEl.innerHTML = '';
     lastRenderedOnsiteGroups = [];
 
     if(!lastWorkbookRows){
@@ -1785,18 +1823,32 @@
 
     const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
 
-    if(mine.length === 0){
-      emptyState.style.display = '';
-      showError('"' + code + '" 코드로 배정된 업무를 찾지 못했습니다. 코드를 확인해 주세요.');
-      return;
-    }
+    // Workbook's bottom summary line for this code (e.g. "ES", "A/Leave") --
+    // shown even when there are zero MEC items today, since ES/선박검사 or
+    // 연차 days are exactly when that's expected, not an error.
+    const note = (parsed.surveyorNotes && parsed.surveyorNotes[code]) || '';
+    const isES = /\bES\b/i.test(note);
+    const isLeave = /A\s*\/?\s*Leave/i.test(note);
+    let flagsHtml = '';
+    if(isES) flagsHtml += `<div class="statusflag es">🚢 ES (선박검사) 예정${note ? ' — ' + esc(note) : ''}</div>`;
+    if(isLeave) flagsHtml += `<div class="statusflag leave">🏖️ 연차 (A/Leave)${note && note.toUpperCase() !== 'A/LEAVE' ? ' — ' + esc(note) : ''}</div>`;
+    statusFlagsEl.innerHTML = flagsHtml;
 
     emptyState.style.display = 'none';
 
-    const merged = buildOnsiteAndRemoteGroups(mine, code);
+    const merged = code ? buildOnsiteAndRemoteGroups(mine, code) : {onsite: [], remote: []};
     let onsiteGroups = merged.onsite;
     const remoteGroups = merged.remote;
     const ownerGroupCount = onsiteGroups.concat(remoteGroups).filter(g=>g.items.some(it=>mentionsOwner(it.details))).length;
+
+    // No MEC items AND nothing manually added: friendly notice instead of an
+    // error, since a zero-item day is completely normal (ES / 연차 / etc).
+    // The 방문지 추가 button and (if any) previously added stops still show.
+    if(mine.length === 0 && onsiteGroups.length === 0 && remoteGroups.length === 0){
+      if(!isES && !isLeave){
+        showError('"' + code + '" 코드로 배정된 MEC 업무가 없습니다 (ES/연차 등 다른 일정이거나, 코드를 다시 확인해 주세요).');
+      }
+    }
 
     if(lastOptimizedOrder){
       const orderIndex = new Map(lastOptimizedOrder.map((k,i)=>[k,i]));
