@@ -997,9 +997,11 @@
     const name = addStopName.value.trim();
     const address = addStopAddress.value.trim();
     if(!name || !address){ addStopName.focus(); return; }
-    const stops = loadManualStops();
+    const code = codeInput.value.trim().toUpperCase();
+    if(!code){ setSyncStatus('먼저 검사관코드를 입력해 주세요', 'warn'); return; }
+    const stops = loadManualStops(code);
     stops.push({id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2,6), customer: name, address});
-    saveManualStops(stops);
+    saveManualStops(code, stops);
     addStopName.value = ''; addStopAddress.value = '';
     addStopForm.style.display = 'none';
     render();
@@ -1494,8 +1496,9 @@
     if(deleteManualBtn){
       e.preventDefault();
       const id = deleteManualBtn.getAttribute('data-delete-manual-key');
+      const code = codeInput.value.trim().toUpperCase();
       if(window.confirm('이 직접 추가한 방문지를 삭제할까요?')){
-        saveManualStops(loadManualStops().filter(ms => ms.id !== id));
+        saveManualStops(code, loadManualStops(code).filter(ms => ms.id !== id));
         render();
       }
       return;
@@ -1620,12 +1623,24 @@
   // Manually added stops (see "➕ 방문지 추가") aren't tied to any date and
   // persist until the inspector who added them explicitly deletes one -- they
   // are NOT part of the uploaded workbook, so they survive new-day uploads.
-  function loadManualStops(){
-    try{ return JSON.parse(localStorage.getItem(LS_MANUAL_STOPS) || '[]'); }
-    catch(e){ return []; }
+  // Stored per surveyor code (keyed within one localStorage object) so that
+  // switching 검사관코드 on the same device -- or another inspector's device
+  // -- never shows someone else's manually added stops.
+  function loadAllManualStops(){
+    try{ return JSON.parse(localStorage.getItem(LS_MANUAL_STOPS) || '{}'); }
+    catch(e){ return {}; }
   }
-  function saveManualStops(arr){
-    try{ localStorage.setItem(LS_MANUAL_STOPS, JSON.stringify(arr)); }catch(e){}
+  function saveAllManualStops(byCode){
+    try{ localStorage.setItem(LS_MANUAL_STOPS, JSON.stringify(byCode)); }catch(e){}
+  }
+  function loadManualStops(code){
+    const all = loadAllManualStops();
+    return Array.isArray(all[code]) ? all[code] : [];
+  }
+  function saveManualStops(code, arr){
+    const all = loadAllManualStops();
+    all[code] = arr;
+    saveAllManualStops(all);
   }
   function manualStopToGroup(ms, code){
     return {
@@ -1646,7 +1661,7 @@
   // in sync without duplicating this merge logic.
   function buildOnsiteAndRemoteGroups(mine, code){
     const groups = groupItems(mine);
-    const manualGroups = loadManualStops().map(ms => manualStopToGroup(ms, code));
+    const manualGroups = loadManualStops(code).map(ms => manualStopToGroup(ms, code));
     return {
       onsite: groups.filter(g => !g.remote).concat(manualGroups),
       remote: groups.filter(g => g.remote)
