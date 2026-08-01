@@ -261,6 +261,7 @@
   }
   .statusflag.es{background:#E4E9FF; color:#3B4FCC; border:1px solid #C7D0FF;}
   .statusflag.leave{background:#FFF3E6; color:#B8480A; border:1px solid #F3C7A2;}
+  .statusflag.office{background:#E9F5EC; color:#166B45; border:1px solid #B9D9C9;}
   .statusflag + .statusflag{margin-top:8px;}
 
   .summary{display:flex; gap:8px; margin-top:14px;}
@@ -1882,10 +1883,12 @@
     // 연차 days are exactly when that's expected, not an error.
     const note = (parsed.surveyorNotes && parsed.surveyorNotes[code]) || '';
     const isES = /\bES\b/i.test(note);
-    const isLeave = /A\s*\/?\s*Leave/i.test(note);
+    const isLeave = /\bA[\s\/]*L(?:eave)?\b/i.test(note);
+    const isOffice = /Office\s*Day/i.test(note);
     let flagsHtml = '';
     if(isES) flagsHtml += `<div class="statusflag es">🚢 ES (선박검사) 예정${note ? ' — ' + esc(note) : ''}</div>`;
-    if(isLeave) flagsHtml += `<div class="statusflag leave">🏖️ 연차 (A/Leave)${note && note.toUpperCase() !== 'A/LEAVE' ? ' — ' + esc(note) : ''}</div>`;
+    if(isLeave) flagsHtml += `<div class="statusflag leave">🏖️ 연차 (A/Leave)${note && !/^A[\s\/]*L(?:eave)?$/i.test(note) ? ' — ' + esc(note) : ''}</div>`;
+    if(isOffice) flagsHtml += `<div class="statusflag office">🏢 사무실 근무 (Office Day)${note && !/^Office\s*Day$/i.test(note) ? ' — ' + esc(note) : ''}</div>`;
     statusFlagsEl.innerHTML = flagsHtml;
 
     emptyState.style.display = 'none';
@@ -1899,7 +1902,7 @@
     // error, since a zero-item day is completely normal (ES / 연차 / etc).
     // The 방문지 추가 button and (if any) previously added stops still show.
     if(mine.length === 0 && onsiteGroups.length === 0 && remoteGroups.length === 0){
-      if(!isES && !isLeave){
+      if(!isES && !isLeave && !isOffice){
         showError('"' + code + '" 코드로 배정된 MEC 업무가 없습니다 (ES/연차 등 다른 일정이거나, 코드를 다시 확인해 주세요).');
       }
     }
