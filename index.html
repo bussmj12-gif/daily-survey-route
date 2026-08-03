@@ -582,6 +582,7 @@
   const createGistBtn = document.getElementById('createGistBtn');
   const saveSyncBtn = document.getElementById('saveSyncBtn');
   const pasteInput = document.getElementById('pasteInput');
+  const syncBox = document.getElementById('syncBox');
   const applyPasteBtn = document.getElementById('applyPasteBtn');
   const syncCodeArea = document.getElementById('syncCodeArea');
   const syncCodeText = document.getElementById('syncCodeText');
@@ -779,8 +780,27 @@
   function showSyncCode(token, gistId){
     const code = token + '::' + gistId;
     syncCodeText.textContent = code;
-    syncQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(code);
+    // Encoded as a URL (not raw text) so phone camera apps open this site
+    // directly instead of treating the scanned text as a search query --
+    // iPhone's Camera app in particular sends non-URL QR content straight to
+    // Google search, which would leak the token into a search query.
+    const syncUrl = location.origin + location.pathname + '?sync=' + encodeURIComponent(code);
+    syncQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(syncUrl);
     syncCodeArea.style.display = '';
+  }
+
+  // If this page was opened via the sync QR code (?sync=token::gistId),
+  // pre-fill the paste field and open the sync panel so the receiving phone
+  // only has to tap "적용" -- no manual copy-paste, and the token never has
+  // to be typed or searched anywhere.
+  function checkForSyncLink(){
+    const raw = new URLSearchParams(location.search).get('sync');
+    if(!raw) return;
+    history.replaceState(null, '', location.pathname); // scrub the token out of the visible URL/history immediately
+    pasteInput.value = raw;
+    syncBox.open = true;
+    pasteInput.scrollIntoView({behavior:'smooth', block:'center'});
+    showToast('동기화 코드가 채워졌어요 · "적용" 버튼을 눌러주세요');
   }
 
   createGistBtn.addEventListener('click', async function(){
@@ -2052,6 +2072,7 @@
     loadDeviceConfig();
     renderPlaces();
     renderPlaceSelects();
+    checkForSyncLink();
     const {token, gistId} = getDeviceConfig();
     if(token && gistId){
       setSyncStatus('불러오는 중…');
