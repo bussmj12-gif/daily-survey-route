@@ -221,6 +221,21 @@
     border-radius:8px; width:100%; color:var(--ink); background:#fff;
   }
 
+  .modaloverlay{
+    position:fixed; inset:0; background:rgba(22,29,39,.55); z-index:1000;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modalbox{
+    background:var(--surface); border-radius:16px; padding:22px; width:100%; max-width:380px;
+    box-shadow:0 12px 40px rgba(0,0,0,.25);
+  }
+  .modaltitle{font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; color:var(--ink); margin:0 0 6px;}
+  .modalsub{font-size:12.5px; color:var(--ink-soft); margin:0 0 14px; line-height:1.5;}
+  #modalPlaceSelect{
+    width:100%; font-size:14px; padding:10px 10px; border:1.5px solid var(--border); border-radius:9px;
+    background:#fff; color:var(--ink);
+  }
+
   .stagingbanner{
     margin-top:14px; background:linear-gradient(135deg,#FFF3E6,#FFE7D6); border:1.5px solid var(--accent);
     border-radius:14px; padding:14px 16px; box-shadow:var(--shadow);
@@ -517,6 +532,18 @@
 
   <div id="stagingBanner" style="display:none;"></div>
 
+  <div id="startEndModal" class="modaloverlay" style="display:none;">
+    <div class="modalbox">
+      <p class="modaltitle" id="modalTitle">출발지를 선택해 주세요</p>
+      <p class="modalsub" id="modalSub">동선 최적화에 쓰일 위치예요. "즐겨찾는 장소"에 미리 등록해둔 곳 중에서 고르시면 됩니다.</p>
+      <select id="modalPlaceSelect"></select>
+      <div class="btnrow" style="margin-top:14px;">
+        <button type="button" class="smallbtn primary" id="modalConfirmBtn">확인</button>
+        <button type="button" class="smallbtn" id="modalSkipBtn">건너뛰기</button>
+      </div>
+    </div>
+  </div>
+
   <div class="routestrip" id="routeStrip" style="display:none;"></div>
   <div class="mappanel" id="mapPanel" style="display:none;">
     <div id="mapCanvas"></div>
@@ -617,6 +644,12 @@
   const cancelAddStopBtn = document.getElementById('cancelAddStopBtn');
   const routeStrip = document.getElementById('routeStrip');
   const stagingBanner = document.getElementById('stagingBanner');
+  const startEndModal = document.getElementById('startEndModal');
+  const modalTitle = document.getElementById('modalTitle');
+  const modalSub = document.getElementById('modalSub');
+  const modalPlaceSelect = document.getElementById('modalPlaceSelect');
+  const modalConfirmBtn = document.getElementById('modalConfirmBtn');
+  const modalSkipBtn = document.getElementById('modalSkipBtn');
   const statusFlagsEl = document.getElementById('statusFlags');
   const mapPanel = document.getElementById('mapPanel');
 
@@ -632,6 +665,7 @@
   const LS_ADDR_OVERRIDES = 'daily-route-address-overrides';
   const LS_COMPLETED = 'daily-route-completed';
   const LS_MANUAL_STOPS = 'daily-route-manual-stops';
+  const LS_ROUTE_ENDPOINTS = 'daily-route-endpoints';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
@@ -639,6 +673,8 @@
   let lastRenderedOnsiteGroups = []; // onsite groups in the order currently shown on screen, so "검사관 지정 우선권" can map a displayed number back to a group
   let completedKeys = new Set(); // groupKey() of stops marked 완료 for today's workbook
   let lastCompletedDateKey = null;
+  let currentRouteDateKey = null;
+  let autoRouteHandledForDateKey = null; // guards against re-triggering the popup/auto-optimize every render() call within one page session
   let kakaoSdkPromise = null; // caches the loaded Maps SDK so we only inject the script once
   const naviGeocodeCache = new Map(); // address -> {lat,lng} | null, avoids re-hitting the API on repeat taps
 
@@ -995,6 +1031,70 @@
     }catch(e){}
   }
 
+  // ---------- remembered 출발지/도착지 per day (see handleRouteEndpointsForDate) ----------
+  // Keyed by the same dateKey as 완료 처리, so a new day's workbook naturally
+  // asks again while the same day never re-prompts once answered.
+  function loadRouteEndpoints(dateKey){
+    try{
+      const stored = JSON.parse(localStorage.getItem(LS_ROUTE_ENDPOINTS) || 'null');
+      if(stored && stored.date === dateKey) return stored.value;
+    }catch(e){}
+    return null;
+  }
+  function saveRouteEndpoints(dateKey, value){
+    try{
+      localStorage.setItem(LS_ROUTE_ENDPOINTS, JSON.stringify({date: dateKey, value}));
+    }catch(e){}
+  }
+
+  // Shows the 출발지/도착지 picker modal and resolves with the chosen place id
+  // (or '' for "지정 안 함", or null if the inspector hit 건너뛰기).
+  function showPlacePickerModal(title, sub, places, allowEmpty){
+    return new Promise(resolve => {
+      modalTitle.textContent = title;
+      modalSub.textContent = sub;
+      modalPlaceSelect.innerHTML = (allowEmpty ? '<option value="">(지정 안 함)</option>' : '')
+        + places.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+      startEndModal.style.display = '';
+      function cleanup(){
+        startEndModal.style.display = 'none';
+        modalConfirmBtn.removeEventListener('click', onConfirm);
+        modalSkipBtn.removeEventListener('click', onSkip);
+      }
+      function onConfirm(){ cleanup(); resolve(modalPlaceSelect.value); }
+      function onSkip(){ cleanup(); resolve(null); }
+      modalConfirmBtn.addEventListener('click', onConfirm);
+      modalSkipBtn.addEventListener('click', onSkip);
+    });
+  }
+
+  // Runs once per day's data (guarded by autoRouteHandledForDateKey in render()):
+  // - First time this dateKey is seen: ask 출발지 then 도착지 via popup, save the
+  //   answer, then immediately optimize with it.
+  // - Every later time (same day, page reopened/reloaded): skip the popups
+  //   entirely and silently re-apply the saved 출발지/도착지 as the default,
+  //   until the inspector manually re-runs 동선 최적화 with different values.
+  async function handleRouteEndpointsForDate(dateKey){
+    if(!kakaoKeyInput.value.trim()) return; // can't geocode/optimize without a REST key -- nothing to do yet
+    const places = loadPlaces();
+    const saved = loadRouteEndpoints(dateKey);
+    if(saved){
+      if(!places.some(p => p.id === saved.startPlaceId)) return; // the saved place was deleted since
+      startSelect.value = saved.startPlaceId;
+      endSelect.value = saved.endPlaceId || '';
+      await performOptimization(saved.startPlaceId, saved.endPlaceId);
+      return;
+    }
+    if(places.length === 0) return; // nothing to offer in the picker yet -- inspector hasn't set up 즐겨찾는 장소
+    const startId = await showPlacePickerModal('출발지를 선택해 주세요', '동선 최적화에 쓰일 위치예요. "즐겨찾는 장소"에 미리 등록해둔 곳 중에서 고르시면 됩니다.', places, false);
+    if(!startId) return; // skipped -- ask again next time this date loads
+    const endId = await showPlacePickerModal('도착지를 선택해 주세요', '지정하지 않아도 괜찮아요.', places, true);
+    startSelect.value = startId;
+    endSelect.value = endId || '';
+    saveRouteEndpoints(dateKey, {startPlaceId: startId, endPlaceId: endId || ''});
+    await performOptimization(startId, endId || '');
+  }
+
   // ---------- fixed places (home/office etc.) ----------
   function loadPlaces(){
     try{ return JSON.parse(localStorage.getItem(LS_PLACES) || '[]'); }
@@ -1296,23 +1396,23 @@
     });
   });
 
-  optimizeBtn.addEventListener('click', async function(){
+  async function performOptimization(startPlaceId, endPlaceId){
     const key = kakaoKeyInput.value.trim();
     if(key) localStorage.setItem(LS_KAKAO_KEY, key);
-    if(!key){ setRouteStatus('먼저 카카오 REST API 키를 입력해 주세요', 'warn'); return; }
+    if(!key){ setRouteStatus('먼저 카카오 REST API 키를 입력해 주세요', 'warn'); return false; }
     const jsKey = kakaoJsKeyInput.value.trim();
     if(jsKey) localStorage.setItem(LS_KAKAO_JS_KEY, jsKey);
 
     const places = loadPlaces();
-    const startPlace = places.find(p=>p.id===startSelect.value);
-    const endPlace = places.find(p=>p.id===endSelect.value);
-    if(!startPlace){ setRouteStatus('출발지를 선택해 주세요', 'warn'); return; }
-    if(!lastWorkbookRows){ setRouteStatus('먼저 엑셀을 불러와 주세요', 'warn'); return; }
+    const startPlace = places.find(p=>p.id===startPlaceId);
+    const endPlace = places.find(p=>p.id===endPlaceId);
+    if(!startPlace){ setRouteStatus('출발지를 선택해 주세요', 'warn'); return false; }
+    if(!lastWorkbookRows){ setRouteStatus('먼저 엑셀을 불러와 주세요', 'warn'); return false; }
 
     const code = codeInput.value.trim().toUpperCase();
     let parsed;
     try{ parsed = parseWorkbook(lastWorkbookRows); }
-    catch(e){ setRouteStatus(e.message, 'warn'); return; }
+    catch(e){ setRouteStatus(e.message, 'warn'); return false; }
     const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
     const allOnsite = buildOnsiteAndRemoteGroups(mine, code).onsite;
 
@@ -1330,20 +1430,20 @@
       const chosenDisplay = lastRenderedOnsiteGroups[idx];
       if(!chosenDisplay){
         setRouteStatus('목록 번호를 확인해 주세요 (현재 화면에 표시된 번호를 입력해야 해요)', 'warn');
-        return;
+        return false;
       }
       manualChosenKey = groupKey(chosenDisplay);
       manualChosenGroup = chosenDisplay;
     }
 
     const groups = allOnsite.filter(g => !completedKeys.has(groupKey(g)) || groupKey(g) === manualChosenKey);
-    if(groups.length === 0){ setRouteStatus('최적화할 방문 지점이 없습니다 (완료 처리된 곳은 제외됩니다)', 'warn'); return; }
+    if(groups.length === 0){ setRouteStatus('최적화할 방문 지점이 없습니다 (완료 처리된 곳은 제외됩니다)', 'warn'); return false; }
 
     setRouteStatus('좌표 변환 중… (0/' + (groups.length + 1) + ')');
     let done = 0;
     const startCoord = await geocodeAddress(key, startPlace.address);
     done++; setRouteStatus('좌표 변환 중… (' + done + '/' + (groups.length + 1) + ')');
-    if(!startCoord){ setRouteStatus('출발지 주소(' + startPlace.address + ')를 찾지 못했습니다', 'warn'); return; }
+    if(!startCoord){ setRouteStatus('출발지 주소(' + startPlace.address + ')를 찾지 못했습니다', 'warn'); return false; }
 
     let endCoord = null;
     if(endPlace) endCoord = await geocodeAddress(key, endPlace.address);
@@ -1427,6 +1527,14 @@
       });
       if(endCoord) mapNodes.push({name: endPlace.name, lat: endCoord.lat, lng: endCoord.lng, kind: 'end'});
       renderMap(mapNodes);
+    }
+    return true;
+  }
+
+  optimizeBtn.addEventListener('click', async function(){
+    const ok = await performOptimization(startSelect.value, endSelect.value);
+    if(ok && currentRouteDateKey){
+      saveRouteEndpoints(currentRouteDateKey, {startPlaceId: startSelect.value, endPlaceId: endSelect.value});
     }
   });
 
@@ -1946,6 +2054,11 @@
     }
 
     lastRenderedOnsiteGroups = onsiteGroups;
+    currentRouteDateKey = dateKey;
+    if(onsiteGroups.length > 0 && dateKey !== autoRouteHandledForDateKey){
+      autoRouteHandledForDateKey = dateKey;
+      handleRouteEndpointsForDate(dateKey);
+    }
 
     document.getElementById('cOnsite').textContent = onsiteGroups.length;
     document.getElementById('cRemote').textContent = remoteGroups.length;
