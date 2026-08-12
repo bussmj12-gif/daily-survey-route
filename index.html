@@ -12,7 +12,7 @@
 <style>
   :root{
     --bg:#EEF1F4;
-    --surface:#FFFFFF;
+    --surface:#FFFFFF;a
     --ink:#161D27;
     --ink-soft:#5C6673;
     --ink-faint:#8B93A0;
@@ -559,7 +559,7 @@
 
   <div id="addStopBar" style="margin-top:12px;">
     <button type="button" class="smallbtn" id="showAddStopBtn">➕ 방문지 추가</button>
-    <button type="button" class="smallbtn" id="resyncStopsBtn" title="이 기기의 방문지 목록을 클라우드에 강제로 다시 업로드합니다">☁️ 방문지 재동기화</button>
+    <button type="button" class="smallbtn" id="resyncStopsBtn" title="이 기기의 방문지 목록·주소 수정 내용을 클라우드에 강제로 다시 업로드합니다">☁️ 방문지·주소 재동기화</button>
     <div id="addStopForm" style="display:none; margin-top:8px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow);">
       <div class="fieldblock">
         <label for="addStopName">업체명</label>
@@ -658,6 +658,7 @@
   const GIST_FILENAME = 'route-data.json';
   const STAGING_FILENAME = 'staging-data.json';
   const MANUAL_STOPS_FILENAME = 'manual-stops.json';
+  const ADDR_OVERRIDES_FILENAME = 'address-overrides.json';
   const LS_KAKAO_KEY = 'daily-route-kakao-key';
   const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
   const LS_SURVEYOR_CODE = 'daily-route-surveyor-code';
@@ -813,6 +814,32 @@
     }
   }
 
+  // ---------- syncing "주소 수정(✏️)" overrides across an inspector's own devices ----------
+  // Same mirror-the-whole-object approach as manual stops above, so a fix
+  // made on the phone shows up on the computer (and vice versa) next time
+  // either device syncs, instead of staying stuck on just one device.
+  async function pushAddressOverridesToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({
+          files: { [ADDR_OVERRIDES_FILENAME]: { content: JSON.stringify(getAddressOverrides()) } }
+        })
+      });
+    }catch(e){ /* best-effort -- the fix is still saved locally either way */ }
+  }
+  async function pullAddressOverridesFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, ADDR_OVERRIDES_FILENAME);
+    if(data && typeof data === 'object' && !Array.isArray(data)){
+      saveAddressOverrides(data);
+    }
+  }
+
   function showSyncCode(token, gistId){
     const code = token + '::' + gistId;
     syncCodeText.textContent = code;
@@ -914,6 +941,7 @@
     setSyncStatus('불러오는 중…');
     await doPull();
     await pullManualStopsFromGist();
+    await pullAddressOverridesFromGist();
     render();
     await checkStagingWorkbook();
   });
@@ -1158,8 +1186,9 @@
     const origLabel = resyncStopsBtn.textContent;
     resyncStopsBtn.textContent = '☁️ 업로드 중…';
     await pushManualStopsToGist();
+    await pushAddressOverridesToGist();
     resyncStopsBtn.textContent = origLabel;
-    showToast('이 기기의 방문지를 클라우드에 다시 올렸어요');
+    showToast('이 기기의 방문지·주소 수정 내용을 클라우드에 다시 올렸어요');
   });
   cancelAddStopBtn.addEventListener('click', function(){
     addStopForm.style.display = 'none';
@@ -1650,6 +1679,7 @@
         saveAddressOverrides(overrides);
         naviGeocodeCache.delete(next.trim());
         render();
+        pushAddressOverridesToGist();
       }
       return;
     }
@@ -1661,6 +1691,7 @@
       delete overrides[key];
       saveAddressOverrides(overrides);
       render();
+      pushAddressOverridesToGist();
       return;
     }
     const doneBtn = e.target.closest('[data-toggle-done-key]');
@@ -2191,6 +2222,7 @@
       setSyncStatus('불러오는 중…');
       await doPull();
       await pullManualStopsFromGist();
+      await pullAddressOverridesFromGist();
     }else{
       setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
     }
