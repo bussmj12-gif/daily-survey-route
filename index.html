@@ -196,6 +196,11 @@
     width:70px; font-family:'Space Mono',monospace; font-size:13.5px; font-weight:700;
     border:1.5px solid var(--border); border-radius:9px; padding:9px 8px; color:var(--ink);
   }
+  .prioclearbtn{
+    flex:0 0 auto; width:28px; height:28px; border-radius:50%; border:1.5px solid var(--border);
+    background:var(--bg); color:var(--ink-soft); font-size:12px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
   .smallbtn{
     font-size:12.5px; font-weight:700; padding:8px 12px; border-radius:8px;
     border:1.5px solid var(--border); background:var(--bg); color:var(--ink); cursor:pointer;
@@ -563,14 +568,17 @@
             <div class="manualprio" id="manualPrioField1">
               <span class="helptext">1순위 방문지 — 목록 번호</span>
               <input type="number" id="manualPriorityInput1" min="1" placeholder="예: 6">
+              <button type="button" class="prioclearbtn" id="manualPrioClear1" title="지우기">✕</button>
             </div>
             <div class="manualprio" id="manualPrioField2" style="display:none;">
               <span class="helptext">2순위 방문지 — 목록 번호 (선택)</span>
               <input type="number" id="manualPriorityInput2" min="1" placeholder="예: 3">
+              <button type="button" class="prioclearbtn" id="manualPrioClear2" title="지우기">✕</button>
             </div>
             <div class="manualprio" id="manualPrioField3" style="display:none;">
               <span class="helptext">3순위 방문지 — 목록 번호 (선택)</span>
               <input type="number" id="manualPriorityInput3" min="1" placeholder="예: 9">
+              <button type="button" class="prioclearbtn" id="manualPrioClear3" title="지우기">✕</button>
             </div>
           </div>
         </div>
@@ -707,6 +715,9 @@
   const manualPriorityInput3 = document.getElementById('manualPriorityInput3');
   const manualPrioField2 = document.getElementById('manualPrioField2');
   const manualPrioField3 = document.getElementById('manualPrioField3');
+  const manualPrioClear1 = document.getElementById('manualPrioClear1');
+  const manualPrioClear2 = document.getElementById('manualPrioClear2');
+  const manualPrioClear3 = document.getElementById('manualPrioClear3');
   const showAddStopBtn = document.getElementById('showAddStopBtn');
   const resyncStopsBtn = document.getElementById('resyncStopsBtn');
   const addStopForm = document.getElementById('addStopForm');
@@ -1652,6 +1663,18 @@
     if(!manualPriorityInput2.value.trim()){
       manualPriorityInput3.value = '';
     }
+  });
+
+  manualPrioClear1.addEventListener('click', function(){
+    manualPriorityInput1.value = '';
+    manualPriorityInput1.dispatchEvent(new Event('input'));
+  });
+  manualPrioClear2.addEventListener('click', function(){
+    manualPriorityInput2.value = '';
+    manualPriorityInput2.dispatchEvent(new Event('input'));
+  });
+  manualPrioClear3.addEventListener('click', function(){
+    manualPriorityInput3.value = '';
   });
 
   async function performOptimization(startPlaceId, endPlaceId){
