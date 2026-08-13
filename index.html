@@ -387,6 +387,40 @@
   }
   .memo b{font-weight:700;}
 
+  .timebox{
+    margin-top:22px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:16px;
+  }
+  .timebox-head{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;}
+  .timebox-title{font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; color:var(--ink); margin:0;}
+  .timebox-hours{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft);}
+  .timebox-hours input{
+    width:56px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
+    border:1.5px solid var(--border); border-radius:8px; padding:6px 4px; color:var(--ink);
+  }
+  .timebox-summary{font-size:12.5px; color:var(--ink-soft); margin:10px 0 4px;}
+  .timerow{
+    display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px dashed var(--border);
+  }
+  .timerow.is-cancelled{opacity:.45;}
+  .timerow-main{flex:1; min-width:0;}
+  .timerow-name{display:block; font-size:13.5px; font-weight:700; color:var(--ink); overflow-wrap:anywhere;}
+  .timerow-name.strike{text-decoration:line-through;}
+  .timerow-asset{display:block; font-size:11.5px; color:var(--ink-soft); overflow-wrap:anywhere;}
+  .timerow-actions{display:flex; align-items:center; gap:6px; flex:0 0 auto;}
+  .timeinput{
+    width:56px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
+    border:1.5px solid var(--border); border-radius:8px; padding:6px 2px; color:var(--ink);
+  }
+  .timeinput:disabled{background:var(--bg); color:var(--ink-faint);}
+  .timeunit{font-size:11.5px; color:var(--ink-soft);}
+  .timecancelbtn{
+    border:1.5px solid var(--border); background:var(--bg); color:var(--ink-soft); border-radius:8px;
+    padding:6px 9px; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap;
+  }
+  .timerow.is-cancelled .timecancelbtn{background:var(--ok); border-color:var(--ok); color:#fff; opacity:1;}
+  .timebox-note{font-size:11px; color:var(--ink-faint); line-height:1.6; margin-top:12px;}
+
   footer{
     text-align:center; font-size:11px; color:var(--ink-faint); margin-top:26px;
     padding:0 24px; line-height:1.6;
@@ -594,6 +628,19 @@
 
   <div class="stops" id="stopsList"></div>
 
+  <div class="timebox" id="timeAllocationBox" style="display:none;">
+    <div class="timebox-head">
+      <p class="timebox-title">⏱ 시간 배분</p>
+      <div class="timebox-hours">
+        <label for="dailyHoursInput">하루 근무시간</label>
+        <input type="number" id="dailyHoursInput" min="1" max="24" step="0.5" value="7">시간
+      </div>
+    </div>
+    <p class="timebox-summary" id="timeAllocationSummary"></p>
+    <div id="timeAllocationList"></div>
+    <p class="timebox-note">취소된 항목은 시간 배분에서 빠지고, 남은 시간을 15분 단위로 나머지 항목에 재분배합니다. 시간 칸에 직접 입력하면 그 항목은 고정되고, 나머지 항목끼리 남은 시간을 다시 나눠 가집니다.</p>
+  </div>
+
   <footer>
     검사장소를 누르면 카카오맵 검색이 열립니다 (앱 설치 시 자동 연결) · 길찾기 버튼은 좌표 기반으로 카카오맵 경로 안내를 바로 엽니다 (REST API 키 필요, 출발지는 카카오맵 앱이 현재 위치로 자동 설정) · 주소 복사 버튼으로 다른 앱에 붙여넣을 수 있습니다 · 전화번호를 누르면 바로 통화가 걸립니다.<br>
     동기화 데이터는 내 GitHub 비공개 Gist에만 저장되며, 발급한 토큰은 이 브라우저에만 보관됩니다.
@@ -660,8 +707,38 @@
   const statusFlagsEl = document.getElementById('statusFlags');
   const mapPanel = document.getElementById('mapPanel');
   const closeMapBtn = document.getElementById('closeMapBtn');
+  const timeAllocationBox = document.getElementById('timeAllocationBox');
+  const timeAllocationSummary = document.getElementById('timeAllocationSummary');
+  const timeAllocationList = document.getElementById('timeAllocationList');
+  const dailyHoursInput = document.getElementById('dailyHoursInput');
   closeMapBtn.addEventListener('click', function(){
     mapPanel.style.display = 'none';
+  });
+
+  timeAllocationList.addEventListener('click', function(e){
+    const cancelBtn = e.target.closest('[data-cancel-key]');
+    if(!cancelBtn) return;
+    const key = cancelBtn.getAttribute('data-cancel-key');
+    if(itemTimeState.cancelled.has(key)) itemTimeState.cancelled.delete(key);
+    else{ itemTimeState.cancelled.add(key); delete itemTimeState.manual[key]; }
+    if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
+    render();
+  });
+  timeAllocationList.addEventListener('change', function(e){
+    const input = e.target.closest('[data-time-key]');
+    if(!input) return;
+    const key = input.getAttribute('data-time-key');
+    const val = parseInt(input.value, 10);
+    if(!isNaN(val) && val >= 0) itemTimeState.manual[key] = val;
+    else delete itemTimeState.manual[key];
+    if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
+    render();
+  });
+  dailyHoursInput.addEventListener('change', function(){
+    const v = parseFloat(dailyHoursInput.value);
+    itemTimeState.hours = isNaN(v) ? null : v;
+    if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
+    render();
   });
 
   const LS_TOKEN = 'daily-route-gh-token';
@@ -678,6 +755,7 @@
   const LS_COMPLETED = 'daily-route-completed';
   const LS_MANUAL_STOPS = 'daily-route-manual-stops';
   const LS_ROUTE_ENDPOINTS = 'daily-route-endpoints';
+  const LS_ITEM_TIME = 'daily-route-item-time';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
@@ -687,6 +765,8 @@
   let lastCompletedDateKey = null;
   let currentRouteDateKey = null;
   let autoRouteHandledForDateKey = null; // guards against re-triggering the popup/auto-optimize every render() call within one page session
+  let itemTimeState = { cancelled: new Set(), manual: {}, hours: null };
+  let itemTimeDateKey = null;
   let kakaoSdkPromise = null; // caches the loaded Maps SDK so we only inject the script once
   const naviGeocodeCache = new Map(); // address -> {lat,lng} | null, avoids re-hitting the API on repeat taps
 
@@ -1084,6 +1164,84 @@
     try{
       localStorage.setItem(LS_ROUTE_ENDPOINTS, JSON.stringify({date: dateKey, value}));
     }catch(e){}
+  }
+
+  // ---------- 시간 배분 (하루 근무시간을 취소되지 않은 검사 항목 수로 15분 단위 배분) ----------
+  function loadItemTimeState(dateKey){
+    try{
+      const stored = JSON.parse(localStorage.getItem(LS_ITEM_TIME) || 'null');
+      if(stored && stored.date === dateKey){
+        return { cancelled: new Set(stored.cancelled || []), manual: stored.manual || {}, hours: stored.hours != null ? stored.hours : null };
+      }
+    }catch(e){}
+    return { cancelled: new Set(), manual: {}, hours: null };
+  }
+  function saveItemTimeState(dateKey, state){
+    try{
+      localStorage.setItem(LS_ITEM_TIME, JSON.stringify({
+        date: dateKey, cancelled: [...state.cancelled], manual: state.manual, hours: state.hours
+      }));
+    }catch(e){}
+  }
+  function itemKey(it, idx){
+    return it.id ? ('id:' + it.id) : ('idx:' + idx + ':' + it.customer + ':' + it.asset);
+  }
+  // Splits totalMinutes into `count` chunks that are each a multiple of 15
+  // minutes and sum back to the nearest 15-minute total -- doesn't need to
+  // divide evenly, just spreads the leftover 15-minute blocks one per item.
+  function distributeMinutesBlocks(totalMinutes, count){
+    if(count <= 0) return [];
+    const totalBlocks = Math.max(0, Math.round(totalMinutes / 15));
+    const base = Math.floor(totalBlocks / count);
+    let extra = totalBlocks - base * count;
+    const result = [];
+    for(let i=0; i<count; i++){
+      let blocks = base + (extra > 0 ? 1 : 0);
+      if(extra > 0) extra--;
+      result.push(blocks * 15);
+    }
+    return result;
+  }
+  function renderTimeAllocation(mine){
+    if(!mine || mine.length === 0){ timeAllocationBox.style.display = 'none'; return; }
+
+    const hours = itemTimeState.hours != null ? itemTimeState.hours : 7;
+    dailyHoursInput.value = hours;
+    const totalMinutes = Math.round(hours * 60);
+
+    const items = mine.map((it, idx) => ({ it, key: itemKey(it, idx) }));
+    const active = items.filter(x => !itemTimeState.cancelled.has(x.key));
+    const manualItems = active.filter(x => itemTimeState.manual[x.key] != null);
+    const autoItems = active.filter(x => itemTimeState.manual[x.key] == null);
+    const manualTotal = manualItems.reduce((s,x) => s + Number(itemTimeState.manual[x.key] || 0), 0);
+    const remaining = totalMinutes - manualTotal;
+    const autoBlocks = distributeMinutesBlocks(remaining, autoItems.length);
+
+    const timeByKey = {};
+    manualItems.forEach(x => { timeByKey[x.key] = Number(itemTimeState.manual[x.key]); });
+    autoItems.forEach((x,i) => { timeByKey[x.key] = autoBlocks[i]; });
+
+    timeAllocationSummary.textContent =
+      `취소 ${itemTimeState.cancelled.size}건 제외 · 진행 ${active.length}건 · 하루 ${hours}시간(${totalMinutes}분) 기준`;
+
+    timeAllocationList.innerHTML = items.map(({it, key}) => {
+      const cancelled = itemTimeState.cancelled.has(key);
+      const minutes = timeByKey[key] != null ? timeByKey[key] : 0;
+      return `
+        <div class="timerow${cancelled ? ' is-cancelled' : ''}">
+          <div class="timerow-main">
+            <span class="timerow-name${cancelled ? ' strike' : ''}">${esc(it.customer || '(업체명 미기재)')}</span>
+            <span class="timerow-asset">${esc(it.asset || '')}</span>
+          </div>
+          <div class="timerow-actions">
+            <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${cancelled ? 'disabled' : ''}>
+            <span class="timeunit">분</span>
+            <button type="button" class="timecancelbtn" data-cancel-key="${esc(key)}">${cancelled ? '↺ 복원' : '✕ 취소'}</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    timeAllocationBox.style.display = '';
   }
 
   // Shows the 출발지/도착지 picker modal and resolves with the chosen place id
@@ -2020,6 +2178,7 @@
     clearError();
     statusFlagsEl.innerHTML = '';
     lastRenderedOnsiteGroups = [];
+    timeAllocationBox.style.display = 'none';
 
     if(!lastWorkbookRows){
       emptyState.style.display = '';
@@ -2044,6 +2203,10 @@
     if(dateKey !== lastCompletedDateKey){
       completedKeys = loadCompletedForDate(dateKey);
       lastCompletedDateKey = dateKey;
+    }
+    if(dateKey !== itemTimeDateKey){
+      itemTimeState = loadItemTimeState(dateKey);
+      itemTimeDateKey = dateKey;
     }
 
     const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
@@ -2155,6 +2318,8 @@
       remoteGroups.forEach(g=>{ html += renderGroup(g, order++); });
     }
     stopsList.innerHTML = html;
+
+    renderTimeAllocation(mine);
   }
 
   async function processWorkbookArrayBuffer(uint8Data, displayName){
