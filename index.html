@@ -675,6 +675,28 @@
       </div>
     </div>
     <p class="timebox-summary" id="timeAllocationSummary"></p>
+    <div class="btnrow" style="margin-top:2px; margin-bottom:10px;">
+      <button type="button" class="smallbtn" id="showAddTimeProjectBtn">➕ 프로젝트 추가</button>
+    </div>
+    <div id="addTimeProjectForm" style="display:none; margin-bottom:12px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); padding:14px;">
+      <div class="fieldblock">
+        <label for="addTimeProjectCustomer">업체명 / 대상</label>
+        <input type="text" id="addTimeProjectCustomer" placeholder="예: OO해운 (운항선)">
+      </div>
+      <div class="fieldblock" style="margin-top:8px;">
+        <label for="addTimeProjectAsset">업무 내용</label>
+        <input type="text" id="addTimeProjectAsset" placeholder="예: 운항선 검사 / Type Approval / Works Approval">
+      </div>
+      <div class="fieldblock" style="margin-top:8px;">
+        <label for="addTimeProjectNumber">Project Number (선택)</label>
+        <input type="text" id="addTimeProjectNumber" placeholder="모르면 비워두세요">
+      </div>
+      <p class="helptext" style="margin-top:6px;">방문지(동선)를 추가하지 않아도 시간 배분에만 단독으로 추가할 수 있어요. 운항선 검사나 보유 중인 Type Approval / Works Approval처럼 특정 방문지가 없는 업무에 사용하세요. 지우기 전까지 매일 목록에 계속 남아있습니다.</p>
+      <div class="btnrow" style="margin-top:10px;">
+        <button type="button" class="smallbtn primary" id="confirmAddTimeProjectBtn">추가</button>
+        <button type="button" class="smallbtn" id="cancelAddTimeProjectBtn">취소</button>
+      </div>
+    </div>
     <div id="timeAllocationList"></div>
     <div class="btnrow" style="margin-top:14px;">
       <button type="button" class="smallbtn" id="exportTimeExcelBtn">📊 엑셀로 내보내기</button>
@@ -763,11 +785,27 @@
   const dailyHoursInput = document.getElementById('dailyHoursInput');
   const exportTimeExcelBtn = document.getElementById('exportTimeExcelBtn');
   const printTimeBtn = document.getElementById('printTimeBtn');
+  const showAddTimeProjectBtn = document.getElementById('showAddTimeProjectBtn');
+  const addTimeProjectForm = document.getElementById('addTimeProjectForm');
+  const addTimeProjectCustomer = document.getElementById('addTimeProjectCustomer');
+  const addTimeProjectAsset = document.getElementById('addTimeProjectAsset');
+  const addTimeProjectNumber = document.getElementById('addTimeProjectNumber');
+  const confirmAddTimeProjectBtn = document.getElementById('confirmAddTimeProjectBtn');
+  const cancelAddTimeProjectBtn = document.getElementById('cancelAddTimeProjectBtn');
   closeMapBtn.addEventListener('click', function(){
     mapPanel.style.display = 'none';
   });
 
   timeAllocationList.addEventListener('click', function(e){
+    const delProjectBtn = e.target.closest('[data-delete-time-project-key]');
+    if(delProjectBtn){
+      const id = delProjectBtn.getAttribute('data-delete-time-project-key');
+      const code = codeInput.value.trim().toUpperCase();
+      saveManualTimeProjects(code, loadManualTimeProjects(code).filter(mp => mp.id !== id));
+      pushManualTimeProjectsToGist();
+      render();
+      return;
+    }
     const cancelBtn = e.target.closest('[data-cancel-key]');
     if(!cancelBtn) return;
     const key = cancelBtn.getAttribute('data-cancel-key');
@@ -897,6 +935,7 @@
   const MANUAL_STOPS_FILENAME = 'manual-stops.json';
   const ADDR_OVERRIDES_FILENAME = 'address-overrides.json';
   const PROJECT_OVERRIDES_FILENAME = 'project-overrides.json';
+  const MANUAL_TIME_PROJECTS_FILENAME = 'manual-time-projects.json';
   const TIME_ALLOCATION_FILENAME = 'time-allocation.json';
   const LS_KAKAO_KEY = 'daily-route-kakao-key';
   const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
@@ -908,6 +947,7 @@
   const LS_ROUTE_ENDPOINTS = 'daily-route-endpoints';
   const LS_ITEM_TIME = 'daily-route-item-time';
   const LS_PROJECT_OVERRIDES = 'daily-route-project-overrides';
+  const LS_MANUAL_TIME_PROJECTS = 'daily-route-manual-time-projects';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
@@ -1054,6 +1094,32 @@
     const data = await pullGistFile(token, gistId, MANUAL_STOPS_FILENAME);
     if(data && typeof data === 'object' && !Array.isArray(data)){
       saveAllManualStops(data);
+    }
+  }
+
+  // ---------- syncing standalone "⏱ 시간 배분 › ➕ 프로젝트 추가" entries ----------
+  // Same per-검사관코드 mirror-the-whole-object approach as manual stops --
+  // these are projects (운항선, 보유 Type/Works Approval 등) added directly
+  // to time allocation without a visit/방문지 attached.
+  async function pushManualTimeProjectsToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({
+          files: { [MANUAL_TIME_PROJECTS_FILENAME]: { content: JSON.stringify(loadAllManualTimeProjects()) } }
+        })
+      });
+    }catch(e){ /* best-effort -- the entry is still saved locally either way */ }
+  }
+  async function pullManualTimeProjectsFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, MANUAL_TIME_PROJECTS_FILENAME);
+    if(data && typeof data === 'object' && !Array.isArray(data)){
+      saveAllManualTimeProjects(data);
     }
   }
 
@@ -1481,11 +1547,16 @@
       const fee = itemTimeState.fees[key] || 0;
       const projectVal = effectiveProject(it) || '—';
       const isNewProject = /^new$/i.test(projectVal);
+      const originTag = it.isManualTimeProject ? '<span class="tag manual">🔧 직접 추가</span>'
+        : (it.isManualStopTime ? '<span class="tag manual">📍 방문지</span>' : '');
+      const deleteBtn = it.isManualTimeProject
+        ? `<button type="button" class="timecancelbtn" data-delete-time-project-key="${esc(it.manualTimeProjectId)}" style="color:var(--danger); border-color:#F1C4B8;">🗑️ 삭제</button>`
+        : '';
       return `
         <div class="timerow${cancelled ? ' is-cancelled' : ''}">
           <div class="timerow-main">
             <span class="timerow-name${cancelled ? ' strike' : ''}">${esc(it.customer || '(업체명 미기재)')}</span>
-            <span class="timerow-asset">${esc(it.asset || '')} · <span class="timerow-project${isNewProject ? ' is-new' : ''}">${esc(projectVal)}</span></span>
+            <span class="timerow-asset">${esc(it.asset || '')} · <span class="timerow-project${isNewProject ? ' is-new' : ''}">${esc(projectVal)}</span>${originTag ? ' ' + originTag : ''}</span>
           </div>
           <div class="timerow-actions">
             <div class="timerow-field">
@@ -1497,6 +1568,7 @@
               <span class="timeunit">원</span>
             </div>
             <button type="button" class="timecancelbtn" data-cancel-key="${esc(key)}">${cancelled ? '↺ 복원' : '✕ 취소'}</button>
+            ${deleteBtn}
           </div>
         </div>`;
     }).join('');
@@ -1618,9 +1690,10 @@
     await pushManualStopsToGist();
     await pushAddressOverridesToGist();
     await pushProjectOverridesToGist();
+    await pushManualTimeProjectsToGist();
     await pushTimeAllocationToGist();
     resyncStopsBtn.textContent = origLabel;
-    showToast('이 기기의 방문지·주소·Project Number·시간 배분 내용을 클라우드에 다시 올렸어요');
+    showToast('이 기기의 방문지·주소·Project Number·직접 추가한 프로젝트·시간 배분 내용을 클라우드에 다시 올렸어요');
   });
   cancelAddStopBtn.addEventListener('click', function(){
     addStopForm.style.display = 'none';
@@ -1639,6 +1712,30 @@
     addStopForm.style.display = 'none';
     render();
     pushManualStopsToGist();
+  });
+
+  showAddTimeProjectBtn.addEventListener('click', function(){
+    addTimeProjectForm.style.display = addTimeProjectForm.style.display === 'none' ? '' : 'none';
+    if(addTimeProjectForm.style.display !== 'none') addTimeProjectCustomer.focus();
+  });
+  cancelAddTimeProjectBtn.addEventListener('click', function(){
+    addTimeProjectForm.style.display = 'none';
+    addTimeProjectCustomer.value = ''; addTimeProjectAsset.value = ''; addTimeProjectNumber.value = '';
+  });
+  confirmAddTimeProjectBtn.addEventListener('click', function(){
+    const customer = addTimeProjectCustomer.value.trim();
+    const asset = addTimeProjectAsset.value.trim();
+    const project = addTimeProjectNumber.value.trim();
+    if(!customer || !asset){ addTimeProjectCustomer.focus(); return; }
+    const code = codeInput.value.trim().toUpperCase();
+    if(!code){ setSyncStatus('먼저 검사관코드를 입력해 주세요', 'warn'); return; }
+    const projects = loadManualTimeProjects(code);
+    projects.push({id: 't' + Date.now().toString(36) + Math.random().toString(36).slice(2,6), customer, asset, project});
+    saveManualTimeProjects(code, projects);
+    addTimeProjectCustomer.value = ''; addTimeProjectAsset.value = ''; addTimeProjectNumber.value = '';
+    addTimeProjectForm.style.display = 'none';
+    render();
+    pushManualTimeProjectsToGist();
   });
 
   // ---------- route optimization (Kakao geocoding + nearest-neighbor) ----------
@@ -2383,6 +2480,48 @@
     all[code] = arr;
     saveAllManualStops(all);
   }
+  // Standalone time-allocation-only entries (projects with no 방문지/동선
+  // attached, e.g. 운항선 검사 or a Type/Works Approval the inspector already
+  // holds). Stored per 검사관코드 the same way manual stops are, so they
+  // persist day to day until removed -- but unlike manual stops they never
+  // produce a stop card, only a row inside "⏱ 시간 배분".
+  function loadAllManualTimeProjects(){
+    try{
+      const parsed = JSON.parse(localStorage.getItem(LS_MANUAL_TIME_PROJECTS) || '{}');
+      if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      return parsed;
+    }catch(e){ return {}; }
+  }
+  function saveAllManualTimeProjects(byCode){
+    try{ localStorage.setItem(LS_MANUAL_TIME_PROJECTS, JSON.stringify(byCode)); }catch(e){}
+  }
+  function loadManualTimeProjects(code){
+    const all = loadAllManualTimeProjects();
+    return Array.isArray(all[code]) ? all[code] : [];
+  }
+  function saveManualTimeProjects(code, arr){
+    const all = loadAllManualTimeProjects();
+    all[code] = arr;
+    saveAllManualTimeProjects(all);
+  }
+  // Converts a standalone manual project into the same shape as a workbook
+  // row so it can flow through itemKey/projectKey/effectiveProject unchanged.
+  function manualTimeProjectToItem(mp, code){
+    return {
+      id: 'mtp:' + mp.id, project: mp.project || '', customer: mp.customer, asset: mp.asset,
+      location: '', address: '', phone: '', intended: '', details: '', surveyor: code,
+      isManualTimeProject: true, manualTimeProjectId: mp.id
+    };
+  }
+  // Converts a manual stop (방문지 추가) into the same item shape so it
+  // automatically shows up in "⏱ 시간 배분" too, without a separate add step.
+  function manualStopToTimeItem(ms, code){
+    return {
+      id: 'ms:' + ms.id, project: '', customer: ms.customer, asset: '직접 추가한 방문지',
+      location: '직접추가', address: ms.address, phone: ms.phone || '', intended: '', details: '',
+      surveyor: code, isManualStopTime: true
+    };
+  }
   function manualStopToGroup(ms, code){
     return {
       customer: ms.customer,
@@ -2637,7 +2776,13 @@
     }
     stopsList.innerHTML = html;
 
-    renderTimeAllocation(mine, (parsed.dateText || '') + (parsed.dayText ? ' (' + parsed.dayText + ')' : ''));
+    // "⏱ 시간 배분" covers everything for the day -- workbook 배정 건은 물론,
+    // 방문지 추가로 만든 동선(자동 반영)과 동선 없이 단독으로 추가한 프로젝트
+    // (운항선, 보유 Type/Works Approval 등)까지 모두 합쳐서 보여준다.
+    const timeAllocationItems = mine
+      .concat(code ? loadManualStops(code).map(ms => manualStopToTimeItem(ms, code)) : [])
+      .concat(code ? loadManualTimeProjects(code).map(mp => manualTimeProjectToItem(mp, code)) : []);
+    renderTimeAllocation(timeAllocationItems, (parsed.dateText || '') + (parsed.dayText ? ' (' + parsed.dayText + ')' : ''));
   }
 
   async function processWorkbookArrayBuffer(uint8Data, displayName){
@@ -2738,6 +2883,7 @@
       await pullManualStopsFromGist();
       await pullAddressOverridesFromGist();
       await pullProjectOverridesFromGist();
+      await pullManualTimeProjectsFromGist();
       await pullTimeAllocationFromGist();
     }else{
       setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
