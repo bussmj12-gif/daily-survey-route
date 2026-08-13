@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
 <title>오늘의 검사 일정</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#161D27">
@@ -406,8 +406,9 @@
     margin-top:22px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
     box-shadow:var(--shadow); padding:16px;
   }
-  .timebox-head{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;}
+  .timebox-head{display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:8px;}
   .timebox-title{font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; color:var(--ink); margin:0;}
+  .timebox-date{font-size:11.5px; color:var(--ink-soft); margin:2px 0 0;}
   .timebox-hours{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft);}
   .timebox-hours input{
     width:56px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
@@ -415,21 +416,26 @@
   }
   .timebox-summary{font-size:12.5px; color:var(--ink-soft); margin:10px 0 4px;}
   .timerow{
-    display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px dashed var(--border);
+    display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px dashed var(--border); flex-wrap:wrap;
   }
   .timerow.is-cancelled{opacity:.45;}
-  .timerow-main{flex:1; min-width:0;}
+  .timerow-main{flex:1 1 160px; min-width:0;}
   .timerow-name{display:block; font-size:13.5px; font-weight:700; color:var(--ink); overflow-wrap:anywhere;}
   .timerow-name.strike{text-decoration:line-through;}
   .timerow-asset{display:block; font-size:11.5px; color:var(--ink-soft); overflow-wrap:anywhere;}
   .timerow-project{font-weight:800; color:var(--ink); font-family:'Space Mono',monospace;}
   .timerow-project.is-new{color:#B8480A;}
-  .timerow-actions{display:flex; align-items:center; gap:6px; flex:0 0 auto;}
+  .timerow-actions{display:flex; align-items:center; gap:6px; flex:0 0 auto; flex-wrap:wrap;}
+  .timerow-field{display:flex; align-items:center; gap:4px;}
   .timeinput{
     width:56px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
     border:1.5px solid var(--border); border-radius:8px; padding:6px 2px; color:var(--ink);
   }
-  .timeinput:disabled{background:var(--bg); color:var(--ink-faint);}
+  .feeinput{
+    width:78px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
+    border:1.5px solid var(--border); border-radius:8px; padding:6px 2px; color:var(--ok);
+  }
+  .timeinput:disabled, .feeinput:disabled{background:var(--bg); color:var(--ink-faint);}
   .timeunit{font-size:11.5px; color:var(--ink-soft);}
   .timecancelbtn{
     border:1.5px solid var(--border); background:var(--bg); color:var(--ink-soft); border-radius:8px;
@@ -629,7 +635,7 @@
 
   <div id="addStopBar" style="margin-top:12px;">
     <button type="button" class="smallbtn" id="showAddStopBtn">➕ 방문지 추가</button>
-    <button type="button" class="smallbtn" id="resyncStopsBtn" title="이 기기의 방문지 목록·주소 수정 내용을 클라우드에 강제로 다시 업로드합니다">☁️ 방문지·주소 재동기화</button>
+    <button type="button" class="smallbtn" id="resyncStopsBtn" title="이 기기의 방문지 목록·주소·Project Number·시간 배분 내용을 클라우드에 강제로 다시 업로드합니다">☁️ 전체 재동기화</button>
     <div id="addStopForm" style="display:none; margin-top:8px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow);">
       <div class="fieldblock">
         <label for="addStopName">업체명</label>
@@ -659,7 +665,10 @@
 
   <div class="timebox" id="timeAllocationBox" style="display:none;">
     <div class="timebox-head">
-      <p class="timebox-title">⏱ 시간 배분</p>
+      <div>
+        <p class="timebox-title">⏱ 시간 배분</p>
+        <p class="timebox-date" id="timeAllocationDate"></p>
+      </div>
       <div class="timebox-hours">
         <label for="dailyHoursInput">하루 근무시간</label>
         <input type="number" id="dailyHoursInput" min="1" max="24" step="0.5" value="7">시간
@@ -667,7 +676,11 @@
     </div>
     <p class="timebox-summary" id="timeAllocationSummary"></p>
     <div id="timeAllocationList"></div>
-    <p class="timebox-note">항목을 취소하거나 시간을 직접 고치면, 그만큼 위 "하루 근무시간" 합계도 함께 줄거나 늘어요 (다른 항목엔 영향 없음). "하루 근무시간" 칸에 새 숫자를 입력하면, 그 시점의 진행 중인 항목들에 새 시간을 다시 균등하게 나눠 담습니다.</p>
+    <div class="btnrow" style="margin-top:14px;">
+      <button type="button" class="smallbtn" id="exportTimeExcelBtn">📊 엑셀로 내보내기</button>
+      <button type="button" class="smallbtn" id="printTimeBtn">🖨️ 인쇄</button>
+    </div>
+    <p class="timebox-note">항목을 취소하거나 시간을 직접 고치면, 그만큼 위 "하루 근무시간" 합계도 함께 줄거나 늘어요 (다른 항목엔 영향 없음). "하루 근무시간" 칸에 새 숫자를 입력하면, 그 시점의 진행 중인 항목들에 새 시간을 다시 균등하게 나눠 담습니다. 검사비는 자동 배분 없이 직접 입력한 값만 반영됩니다.</p>
   </div>
 
   <footer>
@@ -746,7 +759,10 @@
   const timeAllocationBox = document.getElementById('timeAllocationBox');
   const timeAllocationSummary = document.getElementById('timeAllocationSummary');
   const timeAllocationList = document.getElementById('timeAllocationList');
+  const timeAllocationDate = document.getElementById('timeAllocationDate');
   const dailyHoursInput = document.getElementById('dailyHoursInput');
+  const exportTimeExcelBtn = document.getElementById('exportTimeExcelBtn');
+  const printTimeBtn = document.getElementById('printTimeBtn');
   closeMapBtn.addEventListener('click', function(){
     mapPanel.style.display = 'none';
   });
@@ -761,15 +777,28 @@
     else itemTimeState.cancelled.add(key);
     if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
     render();
+    pushTimeAllocationToGist();
   });
   timeAllocationList.addEventListener('change', function(e){
     const input = e.target.closest('[data-time-key]');
-    if(!input) return;
-    const key = input.getAttribute('data-time-key');
-    const val = parseInt(input.value, 10);
-    itemTimeState.minutes[key] = (!isNaN(val) && val >= 0) ? val : 0;
-    if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
-    render();
+    if(input){
+      const key = input.getAttribute('data-time-key');
+      const val = parseInt(input.value, 10);
+      itemTimeState.minutes[key] = (!isNaN(val) && val >= 0) ? val : 0;
+      if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
+      render();
+      pushTimeAllocationToGist();
+      return;
+    }
+    const feeInput = e.target.closest('[data-fee-key]');
+    if(feeInput){
+      const key = feeInput.getAttribute('data-fee-key');
+      const val = parseInt(feeInput.value, 10);
+      itemTimeState.fees[key] = (!isNaN(val) && val >= 0) ? val : 0;
+      if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
+      render();
+      pushTimeAllocationToGist();
+    }
   });
   dailyHoursInput.addEventListener('change', function(){
     // Explicitly editing 하루 근무시간 is the one action that resets every
@@ -785,6 +814,80 @@
     itemTimeState.hours = hours;
     if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
     render();
+    pushTimeAllocationToGist();
+  });
+
+  // Builds the shared row data (used by both the Excel export and print view)
+  // from the currently-rendered time allocation state.
+  function buildTimeAllocationRows(){
+    const items = lastMineForTimeAllocation.map((it, idx) => ({ it, key: itemKey(it, idx) }));
+    return items.map(({it, key}) => {
+      const cancelled = itemTimeState.cancelled.has(key);
+      return {
+        customer: it.customer || '(업체명 미기재)',
+        asset: it.asset || '',
+        project: effectiveProject(it) || '',
+        workBookId: it.id || '',
+        minutes: cancelled ? 0 : (itemTimeState.minutes[key] || 0),
+        fee: cancelled ? 0 : (itemTimeState.fees[key] || 0),
+        status: cancelled ? '취소' : '진행'
+      };
+    });
+  }
+
+  exportTimeExcelBtn.addEventListener('click', function(){
+    const rows = buildTimeAllocationRows();
+    const aoa = [['날짜','업체명','품목','Project Number','Work Book ID','배정시간(분)','검사비(원)','상태']];
+    rows.forEach(r => aoa.push([lastDateLabelForTimeAllocation, r.customer, r.asset, r.project, r.workBookId, r.minutes, r.fee, r.status]));
+    const activeRows = rows.filter(r => r.status === '진행');
+    aoa.push(['', '', '', '', '합계', activeRows.reduce((s,r)=>s+r.minutes,0), activeRows.reduce((s,r)=>s+r.fee,0), '']);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{wch:16},{wch:24},{wch:22},{wch:16},{wch:12},{wch:12},{wch:12},{wch:8}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '시간배분');
+    const fname = '시간배분_' + (lastDateLabelForTimeAllocation || '오늘').replace(/[\/\\?%*:|"<>]/g, '-') + '.xlsx';
+    XLSX.writeFile(wb, fname);
+  });
+
+  printTimeBtn.addEventListener('click', function(){
+    const rows = buildTimeAllocationRows();
+    const activeRows = rows.filter(r => r.status === '진행');
+    const totalMinutes = activeRows.reduce((s,r)=>s+r.minutes,0);
+    const totalFee = activeRows.reduce((s,r)=>s+r.fee,0);
+    const bodyRows = rows.map(r => `
+      <tr${r.status === '취소' ? ' style="color:#999; text-decoration:line-through;"' : ''}>
+        <td>${esc(r.customer)}</td>
+        <td>${esc(r.asset)}</td>
+        <td>${esc(r.project)}</td>
+        <td>${esc(String(r.workBookId))}</td>
+        <td style="text-align:right;">${r.status === '취소' ? '' : r.minutes + '분'}</td>
+        <td style="text-align:right;">${r.status === '취소' ? '' : r.fee.toLocaleString() + '원'}</td>
+        <td>${esc(r.status)}</td>
+      </tr>`).join('');
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>시간 배분</title>
+      <style>
+        body{font-family:'Malgun Gothic',sans-serif; padding:24px; color:#161D27;}
+        h1{font-size:18px; margin:0 0 4px;}
+        p.sub{font-size:12px; color:#5C6673; margin:0 0 16px;}
+        table{width:100%; border-collapse:collapse; font-size:12px;}
+        th,td{border:1px solid #DCE1E7; padding:6px 8px; text-align:left;}
+        th{background:#F3F3F3;}
+        tfoot td{font-weight:700; background:#FFF8EC;}
+      </style></head><body>
+      <h1>⏱ 시간 배분</h1>
+      <p class="sub">${esc(lastDateLabelForTimeAllocation || '')} · 진행 ${activeRows.length}건 · 시간 합계 ${formatHoursMinutes(totalMinutes)} · 검사비 합계 ${totalFee.toLocaleString()}원</p>
+      <table>
+        <thead><tr><th>업체명</th><th>품목</th><th>Project Number</th><th>Work Book ID</th><th>배정시간</th><th>검사비</th><th>상태</th></tr></thead>
+        <tbody>${bodyRows}</tbody>
+        <tfoot><tr><td colspan="4">합계</td><td style="text-align:right;">${formatHoursMinutes(totalMinutes)}</td><td style="text-align:right;">${totalFee.toLocaleString()}원</td><td></td></tr></tfoot>
+      </table>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    if(!w){ showToast('팝업이 차단됐어요 · 브라우저 팝업 차단을 해제해 주세요'); return; }
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 250);
   });
 
   const LS_TOKEN = 'daily-route-gh-token';
@@ -793,6 +896,8 @@
   const STAGING_FILENAME = 'staging-data.json';
   const MANUAL_STOPS_FILENAME = 'manual-stops.json';
   const ADDR_OVERRIDES_FILENAME = 'address-overrides.json';
+  const PROJECT_OVERRIDES_FILENAME = 'project-overrides.json';
+  const TIME_ALLOCATION_FILENAME = 'time-allocation.json';
   const LS_KAKAO_KEY = 'daily-route-kakao-key';
   const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
   const LS_SURVEYOR_CODE = 'daily-route-surveyor-code';
@@ -812,7 +917,7 @@
   let lastCompletedDateKey = null;
   let currentRouteDateKey = null;
   let autoRouteHandledForDateKey = null; // guards against re-triggering the popup/auto-optimize every render() call within one page session
-  let itemTimeState = { cancelled: new Set(), minutes: {}, hours: null };
+  let itemTimeState = { cancelled: new Set(), minutes: {}, fees: {}, hours: null };
   let itemTimeDateKey = null;
   let kakaoSdkPromise = null; // caches the loaded Maps SDK so we only inject the script once
   const naviGeocodeCache = new Map(); // address -> {lat,lng} | null, avoids re-hitting the API on repeat taps
@@ -978,6 +1083,60 @@
     }
   }
 
+  // ---------- syncing "Project Number 수정" overrides across an inspector's own devices ----------
+  async function pushProjectOverridesToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({
+          files: { [PROJECT_OVERRIDES_FILENAME]: { content: JSON.stringify(getProjectOverrides()) } }
+        })
+      });
+    }catch(e){ /* best-effort -- the fix is still saved locally either way */ }
+  }
+  async function pullProjectOverridesFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, PROJECT_OVERRIDES_FILENAME);
+    if(data && typeof data === 'object' && !Array.isArray(data)){
+      saveProjectOverrides(data);
+    }
+  }
+
+  // ---------- syncing "⏱ 시간 배분" (취소/시간 수정) across an inspector's own devices ----------
+  // Mirrors the single current-day snapshot (not per-date keyed like the
+  // others) since LS_ITEM_TIME already only ever holds one day's state.
+  // render() already ignores a pulled snapshot whose date doesn't match
+  // today's dateKey, so pulling stale data here is harmless.
+  async function pushTimeAllocationToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const raw = localStorage.getItem(LS_ITEM_TIME);
+    if(!raw) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({ files: { [TIME_ALLOCATION_FILENAME]: { content: raw } } })
+      });
+    }catch(e){ /* best-effort -- the change is still saved locally either way */ }
+  }
+  async function pullTimeAllocationFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, TIME_ALLOCATION_FILENAME);
+    if(data && typeof data === 'object' && data.date){
+      try{ localStorage.setItem(LS_ITEM_TIME, JSON.stringify(data)); }catch(e){}
+      // itemTimeState is cached in memory and only reloaded from storage when
+      // render() notices the dateKey changed -- force that reload so a pull
+      // on an already-open page (not just first load) actually takes effect.
+      itemTimeDateKey = null;
+    }
+  }
+
   function showSyncCode(token, gistId){
     const code = token + '::' + gistId;
     syncCodeText.textContent = code;
@@ -1080,6 +1239,8 @@
     await doPull();
     await pullManualStopsFromGist();
     await pullAddressOverridesFromGist();
+    await pullProjectOverridesFromGist();
+    await pullTimeAllocationFromGist();
     render();
     await checkStagingWorkbook();
   });
@@ -1226,15 +1387,15 @@
     try{
       const stored = JSON.parse(localStorage.getItem(LS_ITEM_TIME) || 'null');
       if(stored && stored.date === dateKey){
-        return { cancelled: new Set(stored.cancelled || []), minutes: stored.minutes || {}, hours: stored.hours != null ? stored.hours : null };
+        return { cancelled: new Set(stored.cancelled || []), minutes: stored.minutes || {}, fees: stored.fees || {}, hours: stored.hours != null ? stored.hours : null };
       }
     }catch(e){}
-    return { cancelled: new Set(), minutes: {}, hours: null };
+    return { cancelled: new Set(), minutes: {}, fees: {}, hours: null };
   }
   function saveItemTimeState(dateKey, state){
     try{
       localStorage.setItem(LS_ITEM_TIME, JSON.stringify({
-        date: dateKey, cancelled: [...state.cancelled], minutes: state.minutes, hours: state.hours
+        date: dateKey, cancelled: [...state.cancelled], minutes: state.minutes, fees: state.fees, hours: state.hours
       }));
     }catch(e){}
   }
@@ -1284,9 +1445,13 @@
     return h + '시간' + (m > 0 ? ' ' + m + '분' : '');
   }
   let lastMineForTimeAllocation = [];
-  function renderTimeAllocation(mine){
+  let lastDateLabelForTimeAllocation = '';
+  function renderTimeAllocation(mine, dateLabel){
     lastMineForTimeAllocation = mine || [];
+    lastDateLabelForTimeAllocation = dateLabel || '';
     if(!mine || mine.length === 0){ timeAllocationBox.style.display = 'none'; return; }
+
+    timeAllocationDate.textContent = dateLabel || '';
 
     const items = mine.map((it, idx) => ({ it, key: itemKey(it, idx) }));
     const isBrandNew = Object.keys(itemTimeState.minutes).length === 0 && itemTimeState.cancelled.size === 0;
@@ -1303,15 +1468,17 @@
 
     const active = items.filter(x => !itemTimeState.cancelled.has(x.key));
     const totalMinutes = active.reduce((s,x) => s + (itemTimeState.minutes[x.key] || 0), 0);
+    const totalFees = active.reduce((s,x) => s + (itemTimeState.fees[x.key] || 0), 0);
     itemTimeState.hours = Math.round((totalMinutes / 60) * 100) / 100;
     dailyHoursInput.value = itemTimeState.hours;
 
     timeAllocationSummary.textContent =
-      `취소 ${itemTimeState.cancelled.size}건 제외 · 진행 ${active.length}건 · 합계 ${formatHoursMinutes(totalMinutes)}`;
+      `취소 ${itemTimeState.cancelled.size}건 제외 · 진행 ${active.length}건 · 시간 합계 ${formatHoursMinutes(totalMinutes)} · 검사비 합계 ${totalFees.toLocaleString()}원`;
 
     timeAllocationList.innerHTML = items.map(({it, key}) => {
       const cancelled = itemTimeState.cancelled.has(key);
       const minutes = itemTimeState.minutes[key] || 0;
+      const fee = itemTimeState.fees[key] || 0;
       const projectVal = effectiveProject(it) || '—';
       const isNewProject = /^new$/i.test(projectVal);
       return `
@@ -1321,8 +1488,14 @@
             <span class="timerow-asset">${esc(it.asset || '')} · <span class="timerow-project${isNewProject ? ' is-new' : ''}">${esc(projectVal)}</span></span>
           </div>
           <div class="timerow-actions">
-            <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${cancelled ? 'disabled' : ''}>
-            <span class="timeunit">분</span>
+            <div class="timerow-field">
+              <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${cancelled ? 'disabled' : ''}>
+              <span class="timeunit">분</span>
+            </div>
+            <div class="timerow-field">
+              <input type="number" class="feeinput" min="0" step="1000" placeholder="검사비" value="${cancelled ? '' : (fee || '')}" data-fee-key="${esc(key)}" ${cancelled ? 'disabled' : ''}>
+              <span class="timeunit">원</span>
+            </div>
             <button type="button" class="timecancelbtn" data-cancel-key="${esc(key)}">${cancelled ? '↺ 복원' : '✕ 취소'}</button>
           </div>
         </div>`;
@@ -1444,8 +1617,10 @@
     resyncStopsBtn.textContent = '☁️ 업로드 중…';
     await pushManualStopsToGist();
     await pushAddressOverridesToGist();
+    await pushProjectOverridesToGist();
+    await pushTimeAllocationToGist();
     resyncStopsBtn.textContent = origLabel;
-    showToast('이 기기의 방문지·주소 수정 내용을 클라우드에 다시 올렸어요');
+    showToast('이 기기의 방문지·주소·Project Number·시간 배분 내용을 클라우드에 다시 올렸어요');
   });
   cancelAddStopBtn.addEventListener('click', function(){
     addStopForm.style.display = 'none';
@@ -1971,6 +2146,7 @@
         else delete overrides[key];
         saveProjectOverrides(overrides);
         render();
+        pushProjectOverridesToGist();
       }
       return;
     }
@@ -2461,7 +2637,7 @@
     }
     stopsList.innerHTML = html;
 
-    renderTimeAllocation(mine);
+    renderTimeAllocation(mine, (parsed.dateText || '') + (parsed.dayText ? ' (' + parsed.dayText + ')' : ''));
   }
 
   async function processWorkbookArrayBuffer(uint8Data, displayName){
@@ -2561,6 +2737,8 @@
       await doPull();
       await pullManualStopsFromGist();
       await pullAddressOverridesFromGist();
+      await pullProjectOverridesFromGist();
+      await pullTimeAllocationFromGist();
     }else{
       setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
     }
