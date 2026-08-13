@@ -383,8 +383,13 @@
   .item{padding:12px 16px; display:flex; flex-direction:column; gap:5px;}
   .item + .item{border-top:1px dashed var(--border);}
   .item-top{display:flex; justify-content:space-between; align-items:baseline; gap:8px;}
-  .item-id{font-family:'Space Mono',monospace; font-size:10.5px; color:var(--ink-faint);}
+  .item-id{font-family:'Space Mono',monospace; font-size:10px; color:var(--ink-faint); display:block; margin-top:2px;}
   .item-asset{font-size:13.5px; font-weight:600; color:var(--ink); flex:1;}
+  .item-project{
+    flex:0 0 auto; font-family:'Space Mono',monospace; font-size:12px; font-weight:800; color:var(--ink);
+    background:var(--bg); border:1.5px solid var(--border); border-radius:7px; padding:3px 8px; cursor:pointer;
+  }
+  .item-project.is-new{background:var(--accent-soft); border-color:#F3C7A2; color:#B8480A;}
   .item-intended{font-size:12.5px; color:var(--ink-soft); white-space:pre-line;}
   .item-phone-row{display:flex; align-items:center; gap:8px; margin-top:2px;}
   .item-phone-row a{
@@ -417,6 +422,8 @@
   .timerow-name{display:block; font-size:13.5px; font-weight:700; color:var(--ink); overflow-wrap:anywhere;}
   .timerow-name.strike{text-decoration:line-through;}
   .timerow-asset{display:block; font-size:11.5px; color:var(--ink-soft); overflow-wrap:anywhere;}
+  .timerow-project{font-weight:800; color:var(--ink); font-family:'Space Mono',monospace;}
+  .timerow-project.is-new{color:#B8480A;}
   .timerow-actions{display:flex; align-items:center; gap:6px; flex:0 0 auto;}
   .timeinput{
     width:56px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
@@ -795,6 +802,7 @@
   const LS_MANUAL_STOPS = 'daily-route-manual-stops';
   const LS_ROUTE_ENDPOINTS = 'daily-route-endpoints';
   const LS_ITEM_TIME = 'daily-route-item-time';
+  const LS_PROJECT_OVERRIDES = 'daily-route-project-overrides';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
@@ -1233,6 +1241,28 @@
   function itemKey(it, idx){
     return it.id ? ('id:' + it.id) : ('idx:' + idx + ':' + it.customer + ':' + it.asset);
   }
+  // ---------- Project Number (엑셀 PROJECT 컬럼) ----------
+  // Work Book ID (#511197 style) isn't the number inspectors actually care
+  // about -- the PROJECT column is (BUS/CHA/SEO + number for an existing
+  // project, or the literal text "New" until head office assigns one). We
+  // let the inspector fill in the real number once it's known, keyed by the
+  // Work Book ID so it survives across the same item showing up again.
+  function projectKey(it){
+    return it.id ? ('id:' + it.id) : ('proj:' + it.customer + ':' + it.asset);
+  }
+  function getProjectOverrides(){
+    try{ return JSON.parse(localStorage.getItem(LS_PROJECT_OVERRIDES) || '{}'); }
+    catch(e){ return {}; }
+  }
+  function saveProjectOverrides(obj){
+    try{ localStorage.setItem(LS_PROJECT_OVERRIDES, JSON.stringify(obj)); }catch(e){}
+  }
+  function effectiveProject(it){
+    const overrides = getProjectOverrides();
+    const key = projectKey(it);
+    if(overrides[key]) return overrides[key];
+    return (it.project || '').trim();
+  }
   // Splits totalMinutes into `count` chunks that are each a multiple of 15
   // minutes and sum back to the nearest 15-minute total -- doesn't need to
   // divide evenly, just spreads the leftover 15-minute blocks one per item.
@@ -1282,11 +1312,13 @@
     timeAllocationList.innerHTML = items.map(({it, key}) => {
       const cancelled = itemTimeState.cancelled.has(key);
       const minutes = itemTimeState.minutes[key] || 0;
+      const projectVal = effectiveProject(it) || '—';
+      const isNewProject = /^new$/i.test(projectVal);
       return `
         <div class="timerow${cancelled ? ' is-cancelled' : ''}">
           <div class="timerow-main">
             <span class="timerow-name${cancelled ? ' strike' : ''}">${esc(it.customer || '(업체명 미기재)')}</span>
-            <span class="timerow-asset">${esc(it.asset || '')}</span>
+            <span class="timerow-asset">${esc(it.asset || '')} · <span class="timerow-project${isNewProject ? ' is-new' : ''}">${esc(projectVal)}</span></span>
           </div>
           <div class="timerow-actions">
             <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${cancelled ? 'disabled' : ''}>
@@ -1927,6 +1959,21 @@
       copyAddress(copyBtn.getAttribute('data-copy-address'), copyBtn);
       return;
     }
+    const projectEditBtn = e.target.closest('[data-project-edit-key]');
+    if(projectEditBtn){
+      e.preventDefault();
+      const key = projectEditBtn.getAttribute('data-project-edit-key');
+      const overrides = getProjectOverrides();
+      const current = overrides[key] || '';
+      const next = window.prompt('Project Number를 입력하세요 (예: BUS2610419, CHA..., SEO...)\n확정 전이면 비워두거나 "New"로 남겨두세요.', current);
+      if(next !== null){
+        if(next.trim()) overrides[key] = next.trim();
+        else delete overrides[key];
+        saveProjectOverrides(overrides);
+        render();
+      }
+      return;
+    }
     const editBtn = e.target.closest('[data-editaddr-key]');
     if(editBtn){
       e.preventDefault();
@@ -2243,12 +2290,16 @@
       const phoneLine = showOwnPhone ? `<div class="item-phone-row"><a href="tel:${normPhone(it.phone)}">📞 ${esc(it.phone)}</a></div>` : '';
       const intendedLine = it.intended ? `<div class="item-intended">${esc(it.intended)}</div>` : '';
       const memoLine = it.details ? `<div class="memo"><b>특이사항</b><br>${esc(it.details)}</div>` : '';
+      const pKey = projectKey(it);
+      const projectVal = effectiveProject(it) || '—';
+      const isNewProject = /^new$/i.test(projectVal);
       return `
         <div class="item">
           <div class="item-top">
             <span class="item-asset">${esc(it.asset || '(품목 미기재)')}</span>
-            <span class="item-id">#${esc(it.id || '—')}</span>
+            <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" title="Project Number 수정">${esc(projectVal)}</button>
           </div>
+          <span class="item-id">Work Book #${esc(it.id || '—')}</span>
           ${intendedLine}
           ${phoneLine}
           ${memoLine}
