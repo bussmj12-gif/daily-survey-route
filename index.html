@@ -652,7 +652,7 @@
     </div>
     <p class="timebox-summary" id="timeAllocationSummary"></p>
     <div id="timeAllocationList"></div>
-    <p class="timebox-note">취소된 항목은 시간 배분에서 빠지고, 남은 시간을 15분 단위로 나머지 항목에 재분배합니다. 시간 칸에 직접 입력하면 그 항목은 고정되고, 나머지 항목끼리 남은 시간을 다시 나눠 가집니다.</p>
+    <p class="timebox-note">항목을 취소하거나 시간을 직접 고치면, 그만큼 위 "하루 근무시간" 합계도 함께 줄거나 늘어요 (다른 항목엔 영향 없음). "하루 근무시간" 칸에 새 숫자를 입력하면, 그 시점의 진행 중인 항목들에 새 시간을 다시 균등하게 나눠 담습니다.</p>
   </div>
 
   <footer>
@@ -737,8 +737,10 @@
     const cancelBtn = e.target.closest('[data-cancel-key]');
     if(!cancelBtn) return;
     const key = cancelBtn.getAttribute('data-cancel-key');
+    // The stored minutes value is left untouched either way -- cancelling
+    // just excludes it from the total, restoring brings the same value back.
     if(itemTimeState.cancelled.has(key)) itemTimeState.cancelled.delete(key);
-    else{ itemTimeState.cancelled.add(key); delete itemTimeState.manual[key]; }
+    else itemTimeState.cancelled.add(key);
     if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
     render();
   });
@@ -747,14 +749,22 @@
     if(!input) return;
     const key = input.getAttribute('data-time-key');
     const val = parseInt(input.value, 10);
-    if(!isNaN(val) && val >= 0) itemTimeState.manual[key] = val;
-    else delete itemTimeState.manual[key];
+    itemTimeState.minutes[key] = (!isNaN(val) && val >= 0) ? val : 0;
     if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
     render();
   });
   dailyHoursInput.addEventListener('change', function(){
+    // Explicitly editing 하루 근무시간 is the one action that resets every
+    // currently-active item back to a fresh even split of the new total --
+    // everywhere else (cancel, per-item edit), 하루 근무시간 just displays
+    // the live sum without forcing a redistribution.
     const v = parseFloat(dailyHoursInput.value);
-    itemTimeState.hours = isNaN(v) ? null : v;
+    const hours = isNaN(v) ? 7 : v;
+    const items = lastMineForTimeAllocation.map((it, idx) => ({ it, key: itemKey(it, idx) }));
+    const active = items.filter(x => !itemTimeState.cancelled.has(x.key));
+    const blocks = distributeMinutesBlocks(Math.round(hours * 60), active.length);
+    active.forEach((x,i) => { itemTimeState.minutes[x.key] = blocks[i]; });
+    itemTimeState.hours = hours;
     if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
     render();
   });
@@ -783,7 +793,7 @@
   let lastCompletedDateKey = null;
   let currentRouteDateKey = null;
   let autoRouteHandledForDateKey = null; // guards against re-triggering the popup/auto-optimize every render() call within one page session
-  let itemTimeState = { cancelled: new Set(), manual: {}, hours: null };
+  let itemTimeState = { cancelled: new Set(), minutes: {}, hours: null };
   let itemTimeDateKey = null;
   let kakaoSdkPromise = null; // caches the loaded Maps SDK so we only inject the script once
   const naviGeocodeCache = new Map(); // address -> {lat,lng} | null, avoids re-hitting the API on repeat taps
@@ -1184,20 +1194,28 @@
     }catch(e){}
   }
 
-  // ---------- 시간 배분 (하루 근무시간을 취소되지 않은 검사 항목 수로 15분 단위 배분) ----------
+  // ---------- 시간 배분 ----------
+  // Each active item stores its own explicit minutes value (not recomputed
+  // from a fixed target every render). "하루 근무시간" is used once to seed
+  // an even initial split for a brand-new day, then afterward it just
+  // reflects the live sum of active items' times -- cancelling an item drops
+  // its minutes out of that sum, editing a time changes only that item, and
+  // neither one redistributes the difference onto the others. Explicitly
+  // changing the 하루 근무시간 field itself is the one action that resets
+  // every currently-active item to a fresh even split of the new total.
   function loadItemTimeState(dateKey){
     try{
       const stored = JSON.parse(localStorage.getItem(LS_ITEM_TIME) || 'null');
       if(stored && stored.date === dateKey){
-        return { cancelled: new Set(stored.cancelled || []), manual: stored.manual || {}, hours: stored.hours != null ? stored.hours : null };
+        return { cancelled: new Set(stored.cancelled || []), minutes: stored.minutes || {}, hours: stored.hours != null ? stored.hours : null };
       }
     }catch(e){}
-    return { cancelled: new Set(), manual: {}, hours: null };
+    return { cancelled: new Set(), minutes: {}, hours: null };
   }
   function saveItemTimeState(dateKey, state){
     try{
       localStorage.setItem(LS_ITEM_TIME, JSON.stringify({
-        date: dateKey, cancelled: [...state.cancelled], manual: state.manual, hours: state.hours
+        date: dateKey, cancelled: [...state.cancelled], minutes: state.minutes, hours: state.hours
       }));
     }catch(e){}
   }
@@ -1220,31 +1238,39 @@
     }
     return result;
   }
+  function formatHoursMinutes(mins){
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return h + '시간' + (m > 0 ? ' ' + m + '분' : '');
+  }
+  let lastMineForTimeAllocation = [];
   function renderTimeAllocation(mine){
+    lastMineForTimeAllocation = mine || [];
     if(!mine || mine.length === 0){ timeAllocationBox.style.display = 'none'; return; }
 
-    const hours = itemTimeState.hours != null ? itemTimeState.hours : 7;
-    dailyHoursInput.value = hours;
-    const totalMinutes = Math.round(hours * 60);
-
     const items = mine.map((it, idx) => ({ it, key: itemKey(it, idx) }));
-    const active = items.filter(x => !itemTimeState.cancelled.has(x.key));
-    const manualItems = active.filter(x => itemTimeState.manual[x.key] != null);
-    const autoItems = active.filter(x => itemTimeState.manual[x.key] == null);
-    const manualTotal = manualItems.reduce((s,x) => s + Number(itemTimeState.manual[x.key] || 0), 0);
-    const remaining = totalMinutes - manualTotal;
-    const autoBlocks = distributeMinutesBlocks(remaining, autoItems.length);
+    const isBrandNew = Object.keys(itemTimeState.minutes).length === 0 && itemTimeState.cancelled.size === 0;
+    if(isBrandNew){
+      const hours = itemTimeState.hours != null ? itemTimeState.hours : 7;
+      const blocks = distributeMinutesBlocks(Math.round(hours * 60), items.length);
+      items.forEach((x,i) => { itemTimeState.minutes[x.key] = blocks[i]; });
+    }else{
+      // A new item appeared that we haven't seen before (rare, e.g. workbook
+      // was re-uploaded with an addition) -- give it 0 rather than silently
+      // dropping it, so the inspector notices and can set it manually.
+      items.forEach(x => { if(itemTimeState.minutes[x.key] == null) itemTimeState.minutes[x.key] = 0; });
+    }
 
-    const timeByKey = {};
-    manualItems.forEach(x => { timeByKey[x.key] = Number(itemTimeState.manual[x.key]); });
-    autoItems.forEach((x,i) => { timeByKey[x.key] = autoBlocks[i]; });
+    const active = items.filter(x => !itemTimeState.cancelled.has(x.key));
+    const totalMinutes = active.reduce((s,x) => s + (itemTimeState.minutes[x.key] || 0), 0);
+    itemTimeState.hours = Math.round((totalMinutes / 60) * 100) / 100;
+    dailyHoursInput.value = itemTimeState.hours;
 
     timeAllocationSummary.textContent =
-      `취소 ${itemTimeState.cancelled.size}건 제외 · 진행 ${active.length}건 · 하루 ${hours}시간(${totalMinutes}분) 기준`;
+      `취소 ${itemTimeState.cancelled.size}건 제외 · 진행 ${active.length}건 · 합계 ${formatHoursMinutes(totalMinutes)}`;
 
     timeAllocationList.innerHTML = items.map(({it, key}) => {
       const cancelled = itemTimeState.cancelled.has(key);
-      const minutes = timeByKey[key] != null ? timeByKey[key] : 0;
+      const minutes = itemTimeState.minutes[key] || 0;
       return `
         <div class="timerow${cancelled ? ' is-cancelled' : ''}">
           <div class="timerow-main">
@@ -1260,6 +1286,7 @@
     }).join('');
 
     timeAllocationBox.style.display = '';
+    if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
   }
 
   // Shows the 출발지/도착지 picker modal and resolves with the chosen place id
