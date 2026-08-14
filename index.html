@@ -398,6 +398,7 @@
   .item.is-cancelled{opacity:.45;}
   .item.is-cancelled .itemcancelbtn{background:var(--ok); border-color:var(--ok); color:#fff; opacity:1;}
   .item-asset.strike{text-decoration:line-through;}
+  .donenote{margin:0; padding:10px 16px; font-size:12px; color:var(--ink-faint); font-style:italic;}
   .item-intended{font-size:12.5px; color:var(--ink-soft); white-space:pre-line;}
   .item-phone-row{display:flex; align-items:center; gap:8px; margin-top:2px;}
   .item-phone-row a{
@@ -2581,6 +2582,21 @@
     const gKey = groupKey(g);
     const isDone = completedKeys.has(gKey);
 
+    // Once 검사 완료(✅) is toggled on, the card only needs to keep showing
+    // whatever was actually edited (address fix, Project Number override, an
+    // item 삭제/취소) -- the routine stuff (raw address, 카카오맵/길찾기 etc,
+    // untouched items) is just clutter at that point. Toggling back to
+    // 검사전 brings all of it back immediately, since this only depends on
+    // isDone at render time.
+    const projOverridesMap = getProjectOverrides();
+    function isItemEdited(it){
+      const iKey = itemKey(it, 0);
+      const cancelled = itemTimeState.cancelled.has(iKey);
+      const projOverridden = !!projOverridesMap[projectKey(it)];
+      return cancelled || projOverridden;
+    }
+    const itemsForRender = (isDone && !g.isManual) ? g.items.filter(isItemEdited) : g.items;
+
     let head = `
       <div class="stop-head">
         <div class="stampnum">${order}</div>
@@ -2610,8 +2626,10 @@
     if(uniquePhones.length === 1){
       actions += `<a class="actionbtn call" href="tel:${uniquePhones[0]}">📞 전화하기</a>`;
     }
-    const actionRow = actions ? `<div class="actionrow">${actions}</div>` : '';
-    const addressLine = g.address ? `
+    // Navigation/전화 buttons aren't "edited" content, so they're the first
+    // thing to drop once a stop is marked done.
+    const actionRow = (!isDone && actions) ? `<div class="actionrow">${actions}</div>` : '';
+    const addressLine = (g.address && (!isDone || isOverridden)) ? `
       <div class="addrline">
         <span class="addrtext">${esc(addressForMap)}</span>
         ${isOverridden ? '<span class="addrbadge">수정됨</span>' : ''}
@@ -2619,7 +2637,7 @@
         ${isOverridden ? `<button type="button" class="addrbtn" data-revertaddr-key="${esc(rawAddress)}" title="원본 주소로 되돌리기">↺</button>` : ''}
       </div>` : '';
 
-    const itemsHtml = g.items.map(it=>{
+    const itemsHtml = itemsForRender.map(it=>{
       const showOwnPhone = uniquePhones.length !== 1 && it.phone;
       const phoneLine = showOwnPhone ? `<div class="item-phone-row"><a href="tel:${normPhone(it.phone)}">📞 ${esc(it.phone)}</a></div>` : '';
       const intendedLine = it.intended ? `<div class="item-intended">${esc(it.intended)}</div>` : '';
@@ -2651,7 +2669,10 @@
     const remoteClass = g.remote ? ' is-remote' : '';
     const ownerClass = ownerCount > 0 ? ' has-owner' : '';
     const doneClass = isDone ? ' is-done' : '';
-    return `<div class="stop${remoteClass}${ownerClass}${doneClass}">${head}${addressLine}${actionRow}<div class="items">${itemsHtml}</div></div>`;
+    const nothingEditedNote = (isDone && !addressLine && itemsForRender.length === 0)
+      ? '<p class="donenote">수정된 내용 없음</p>' : '';
+    const itemsBlock = itemsForRender.length > 0 ? `<div class="items">${itemsHtml}</div>` : '';
+    return `<div class="stop${remoteClass}${ownerClass}${doneClass}">${head}${addressLine}${actionRow}${nothingEditedNote}${itemsBlock}</div>`;
   }
 
   function render(){
