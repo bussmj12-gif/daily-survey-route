@@ -2583,17 +2583,14 @@
     const isDone = completedKeys.has(gKey);
 
     // Once 검사 완료(✅) is toggled on, the card only needs to keep showing
-    // whatever was actually edited (address fix, Project Number override, an
-    // item 삭제/취소) -- the routine stuff (raw address, 카카오맵/길찾기 etc,
-    // untouched items) is just clutter at that point. Toggling back to
-    // 검사전 brings all of it back immediately, since this only depends on
-    // isDone at render time.
-    const projOverridesMap = getProjectOverrides();
+    // items with an active exception -- i.e. one that's been 🗑️ 삭제 in
+    // 시간 배분. Filling in a Project Number (New → BUS/CHA/SEO number) is
+    // routine business-as-usual, not a meaningful deviation, so it must NOT
+    // keep an otherwise-untouched item visible after completion -- that was
+    // why multi-item cards kept dragging items along even when nothing about
+    // them actually needed attention post-completion.
     function isItemEdited(it){
-      const iKey = itemKey(it, 0);
-      const cancelled = itemTimeState.cancelled.has(iKey);
-      const projOverridden = !!projOverridesMap[projectKey(it)];
-      return cancelled || projOverridden;
+      return itemTimeState.cancelled.has(itemKey(it, 0));
     }
     const itemsForRender = (isDone && !g.isManual) ? g.items.filter(isItemEdited) : g.items;
 
