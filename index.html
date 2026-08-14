@@ -390,6 +390,14 @@
     background:var(--bg); border:1.5px solid var(--border); border-radius:7px; padding:3px 8px; cursor:pointer;
   }
   .item-project.is-new{background:var(--accent-soft); border-color:#F3C7A2; color:#B8480A;}
+  .item-top-actions{display:flex; align-items:center; gap:6px; flex:0 0 auto;}
+  .itemcancelbtn{
+    border:1.5px solid var(--border); background:var(--bg); color:var(--ink-soft); border-radius:8px;
+    padding:5px 8px; font-size:10.5px; font-weight:700; cursor:pointer; white-space:nowrap;
+  }
+  .item.is-cancelled{opacity:.45;}
+  .item.is-cancelled .itemcancelbtn{background:var(--ok); border-color:var(--ok); color:#fff; opacity:1;}
+  .item-asset.strike{text-decoration:line-through;}
   .item-intended{font-size:12.5px; color:var(--ink-soft); white-space:pre-line;}
   .item-phone-row{display:flex; align-items:center; gap:8px; margin-top:2px;}
   .item-phone-row a{
@@ -2284,6 +2292,17 @@
       render();
       return;
     }
+    const itemCancelBtn = e.target.closest('[data-item-cancel-key]');
+    if(itemCancelBtn){
+      e.preventDefault();
+      const key = itemCancelBtn.getAttribute('data-item-cancel-key');
+      if(itemTimeState.cancelled.has(key)) itemTimeState.cancelled.delete(key);
+      else itemTimeState.cancelled.add(key);
+      if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
+      render();
+      pushTimeAllocationToGist();
+      return;
+    }
     const deleteManualBtn = e.target.closest('[data-delete-manual-key]');
     if(deleteManualBtn){
       e.preventDefault();
@@ -2608,11 +2627,19 @@
       const pKey = projectKey(it);
       const projectVal = effectiveProject(it) || '—';
       const isNewProject = /^new$/i.test(projectVal);
+      // Links this item to its "⏱ 시간 배분" row -- same itemKey() used there,
+      // so toggling here cancels/restores the time-allocation entry too (and
+      // vice versa: cancelling it in 시간 배분 shows this item as 삭제됨ed here).
+      const iKey = itemKey(it, 0);
+      const iCancelled = itemTimeState.cancelled.has(iKey);
       return `
-        <div class="item">
+        <div class="item${iCancelled ? ' is-cancelled' : ''}">
           <div class="item-top">
-            <span class="item-asset">${esc(it.asset || '(품목 미기재)')}</span>
-            <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" title="Project Number 수정">${esc(projectVal)}</button>
+            <span class="item-asset${iCancelled ? ' strike' : ''}">${esc(it.asset || '(품목 미기재)')}</span>
+            <div class="item-top-actions">
+              <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" title="Project Number 수정">${esc(projectVal)}</button>
+              <button type="button" class="itemcancelbtn" data-item-cancel-key="${esc(iKey)}" title="시간 배분에서도 함께 반영돼요">${iCancelled ? '↺ 복원' : '🗑️ 삭제'}</button>
+            </div>
           </div>
           <span class="item-id">Work Book #${esc(it.id || '—')}</span>
           ${intendedLine}
