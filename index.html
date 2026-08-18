@@ -206,6 +206,10 @@
     border:1.5px solid var(--border); background:var(--bg); color:var(--ink); cursor:pointer;
   }
   .smallbtn.primary{background:var(--accent); border-color:var(--accent); color:#fff;}
+  .smallbtn:disabled, .donebtn:disabled, .addrbtn:disabled, .itemcancelbtn:disabled, .item-project:disabled, .timecancelbtn:disabled{
+    opacity:.4; cursor:not-allowed;
+  }
+  #finalizeDayBtn.is-locked{background:#FDECEA; border-color:#F1C4B8; color:#B8480A;}
   .pastebox{display:flex; gap:8px;}
   .pastebox input{flex:1;}
   .qrwrap{display:flex; align-items:center; gap:12px; margin-top:4px;}
@@ -684,6 +688,9 @@
       </div>
     </div>
     <p class="timebox-summary" id="timeAllocationSummary"></p>
+    <div class="btnrow" id="finalizeRow" style="margin-top:2px; margin-bottom:10px;">
+      <button type="button" class="smallbtn" id="finalizeDayBtn">🔒 오늘 마감 (최종 저장)</button>
+    </div>
     <div class="btnrow" style="margin-top:2px; margin-bottom:10px;">
       <button type="button" class="smallbtn" id="showAddTimeProjectBtn">➕ 프로젝트 추가</button>
     </div>
@@ -795,6 +802,7 @@
   const exportTimeExcelBtn = document.getElementById('exportTimeExcelBtn');
   const printTimeBtn = document.getElementById('printTimeBtn');
   const showAddTimeProjectBtn = document.getElementById('showAddTimeProjectBtn');
+  const finalizeDayBtn = document.getElementById('finalizeDayBtn');
   const addTimeProjectForm = document.getElementById('addTimeProjectForm');
   const addTimeProjectCustomer = document.getElementById('addTimeProjectCustomer');
   const addTimeProjectAsset = document.getElementById('addTimeProjectAsset');
@@ -808,6 +816,7 @@
   timeAllocationList.addEventListener('click', function(e){
     const delProjectBtn = e.target.closest('[data-delete-time-project-key]');
     if(delProjectBtn){
+      if(isDateFinalizedGuard()) return;
       const id = delProjectBtn.getAttribute('data-delete-time-project-key');
       const code = codeInput.value.trim().toUpperCase();
       saveManualTimeProjects(code, loadManualTimeProjects(code).filter(mp => mp.id !== id));
@@ -817,6 +826,7 @@
     }
     const cancelBtn = e.target.closest('[data-cancel-key]');
     if(!cancelBtn) return;
+    if(isDateFinalizedGuard()) return;
     const key = cancelBtn.getAttribute('data-cancel-key');
     // The stored minutes value is left untouched either way -- cancelling
     // just excludes it from the total, restoring brings the same value back.
@@ -829,6 +839,7 @@
   timeAllocationList.addEventListener('change', function(e){
     const input = e.target.closest('[data-time-key]');
     if(input){
+      if(isDateFinalizedGuard()){ render(); return; }
       const key = input.getAttribute('data-time-key');
       const val = parseInt(input.value, 10);
       itemTimeState.minutes[key] = (!isNaN(val) && val >= 0) ? val : 0;
@@ -839,6 +850,7 @@
     }
     const feeInput = e.target.closest('[data-fee-key]');
     if(feeInput){
+      if(isDateFinalizedGuard()){ render(); return; }
       const key = feeInput.getAttribute('data-fee-key');
       const val = parseInt(feeInput.value, 10);
       itemTimeState.fees[key] = (!isNaN(val) && val >= 0) ? val : 0;
@@ -848,6 +860,7 @@
     }
   });
   dailyHoursInput.addEventListener('change', function(){
+    if(isDateFinalizedGuard()){ render(); return; }
     // Explicitly editing 하루 근무시간 is the one action that resets every
     // currently-active item back to a fresh even split of the new total --
     // everywhere else (cancel, per-item edit), 하루 근무시간 just displays
@@ -946,6 +959,9 @@
   const PROJECT_OVERRIDES_FILENAME = 'project-overrides.json';
   const MANUAL_TIME_PROJECTS_FILENAME = 'manual-time-projects.json';
   const TIME_ALLOCATION_FILENAME = 'time-allocation.json';
+  const COMPLETED_FILENAME = 'completed-stops.json';
+  const ROUTE_ENDPOINTS_FILENAME = 'route-endpoints.json';
+  const FINALIZED_FILENAME = 'finalized-days.json';
   const LS_KAKAO_KEY = 'daily-route-kakao-key';
   const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
   const LS_SURVEYOR_CODE = 'daily-route-surveyor-code';
@@ -957,6 +973,7 @@
   const LS_ITEM_TIME = 'daily-route-item-time';
   const LS_PROJECT_OVERRIDES = 'daily-route-project-overrides';
   const LS_MANUAL_TIME_PROJECTS = 'daily-route-manual-time-projects';
+  const LS_FINALIZED = 'daily-route-finalized-dates';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
@@ -968,6 +985,15 @@
   let autoRouteHandledForDateKey = null; // guards against re-triggering the popup/auto-optimize every render() call within one page session
   let itemTimeState = { cancelled: new Set(), minutes: {}, fees: {}, hours: null };
   let itemTimeDateKey = null;
+  // Whether the day currently on screen has been 🔒 마감(최종 저장) --
+  // recomputed every render() from LS_FINALIZED, and read by every mutating
+  // handler below to refuse further edits until 마감 해제.
+  let currentDateFinalized = false;
+  function isDateFinalizedGuard(actionLabel){
+    if(!currentDateFinalized) return false;
+    showToast('🔒 마감된 날짜입니다. 먼저 마감을 해제해 주세요' + (actionLabel ? ' (' + actionLabel + ')' : ''));
+    return true;
+  }
   let kakaoSdkPromise = null; // caches the loaded Maps SDK so we only inject the script once
   const naviGeocodeCache = new Map(); // address -> {lat,lng} | null, avoids re-hitting the API on repeat taps
 
@@ -1182,10 +1208,9 @@
   }
 
   // ---------- syncing "⏱ 시간 배분" (취소/시간 수정) across an inspector's own devices ----------
-  // Mirrors the single current-day snapshot (not per-date keyed like the
-  // others) since LS_ITEM_TIME already only ever holds one day's state.
-  // render() already ignores a pulled snapshot whose date doesn't match
-  // today's dateKey, so pulling stale data here is harmless.
+  // Mirrors the whole date-keyed object (every day's state at once), same
+  // as manual stops/projects -- so a past day opened on another device pulls
+  // its own saved 시간 배분 back too, not just today's.
   async function pushTimeAllocationToGist(){
     const {token, gistId} = getDeviceConfig();
     if(!token || !gistId) return;
@@ -1203,12 +1228,82 @@
     const {token, gistId} = getDeviceConfig();
     if(!token || !gistId) return;
     const data = await pullGistFile(token, gistId, TIME_ALLOCATION_FILENAME);
-    if(data && typeof data === 'object' && data.date){
+    if(data && typeof data === 'object' && !Array.isArray(data)){
       try{ localStorage.setItem(LS_ITEM_TIME, JSON.stringify(data)); }catch(e){}
       // itemTimeState is cached in memory and only reloaded from storage when
       // render() notices the dateKey changed -- force that reload so a pull
       // on an already-open page (not just first load) actually takes effect.
       itemTimeDateKey = null;
+    }
+  }
+
+  // ---------- syncing 완료(✅) 처리 상태 across an inspector's own devices ----------
+  async function pushCompletedToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const raw = localStorage.getItem(LS_COMPLETED);
+    if(!raw) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({ files: { [COMPLETED_FILENAME]: { content: raw } } })
+      });
+    }catch(e){ /* best-effort */ }
+  }
+  async function pullCompletedFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, COMPLETED_FILENAME);
+    if(data && typeof data === 'object' && !Array.isArray(data)){
+      try{ localStorage.setItem(LS_COMPLETED, JSON.stringify(data)); }catch(e){}
+      lastCompletedDateKey = null; // force render() to reload from storage
+    }
+  }
+
+  // ---------- syncing 출발지/도착지 per day across an inspector's own devices ----------
+  async function pushRouteEndpointsToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const raw = localStorage.getItem(LS_ROUTE_ENDPOINTS);
+    if(!raw) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({ files: { [ROUTE_ENDPOINTS_FILENAME]: { content: raw } } })
+      });
+    }catch(e){ /* best-effort */ }
+  }
+  async function pullRouteEndpointsFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, ROUTE_ENDPOINTS_FILENAME);
+    if(data && typeof data === 'object' && !Array.isArray(data)){
+      try{ localStorage.setItem(LS_ROUTE_ENDPOINTS, JSON.stringify(data)); }catch(e){}
+    }
+  }
+
+  // ---------- syncing 🔒 마감(최종 저장) status across an inspector's own devices ----------
+  async function pushFinalizedToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const raw = localStorage.getItem(LS_FINALIZED);
+    if(!raw) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({ files: { [FINALIZED_FILENAME]: { content: raw } } })
+      });
+    }catch(e){ /* best-effort */ }
+  }
+  async function pullFinalizedFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, FINALIZED_FILENAME);
+    if(data && typeof data === 'object' && !Array.isArray(data)){
+      try{ localStorage.setItem(LS_FINALIZED, JSON.stringify(data)); }catch(e){}
     }
   }
 
@@ -1315,7 +1410,11 @@
     await pullManualStopsFromGist();
     await pullAddressOverridesFromGist();
     await pullProjectOverridesFromGist();
+    await pullManualTimeProjectsFromGist();
     await pullTimeAllocationFromGist();
+    await pullCompletedFromGist();
+    await pullRouteEndpointsFromGist();
+    await pullFinalizedFromGist();
     render();
     await checkStagingWorkbook();
   });
@@ -1372,6 +1471,7 @@
     if(!pendingStaging) return;
     const rows = pendingStaging.rows;
     const stagedAt = pendingStaging.stagedAt;
+    if(!confirmIfFinalizedReupload(rows)) return;
     lastWorkbookRows = rows;
     lastOptimizedOrder = null;
     lastRouteMeta = null;
@@ -1420,32 +1520,64 @@
   }
 
   // ---------- "검사 완료" toggle (per stop, resets automatically for a new day's workbook) ----------
+  // ---------- 완료 처리, 출발/도착지, 시간 배분: 날짜별로 계속 쌓아서 보관 ----------
+  // Keyed by dateKey ("워크북 날짜|검사관코드") inside one JSON object per
+  // feature, so switching to a different day's workbook (오늘 것이든 지난
+  // 주 것이든) loads that day's own 완료 상태/시간 배분/출발·도착지 back,
+  // instead of only ever remembering the single most-recently-worked day.
+  // ---------- 🔒 마감(최종 저장): locks a date's 완료 처리/시간 배분/방문지 ----------
+  // against further edits, and against a stale/incorrect workbook re-upload
+  // silently overwriting it (see confirmIfFinalizedReupload()).
+  function loadFinalizedDates(){
+    try{
+      const v = JSON.parse(localStorage.getItem(LS_FINALIZED) || '{}');
+      return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+    }catch(e){ return {}; }
+  }
+  function saveFinalizedDates(map){
+    try{ localStorage.setItem(LS_FINALIZED, JSON.stringify(map)); }catch(e){}
+  }
+  function isDateFinalized(dateKey){
+    return !!loadFinalizedDates()[dateKey];
+  }
+  function setDateFinalized(dateKey, finalized){
+    const map = loadFinalizedDates();
+    if(finalized) map[dateKey] = { at: new Date().toISOString() };
+    else delete map[dateKey];
+    saveFinalizedDates(map);
+  }
+
   function loadCompletedForDate(dateKey){
     try{
-      const stored = JSON.parse(localStorage.getItem(LS_COMPLETED) || 'null');
-      if(stored && stored.date === dateKey) return new Set(stored.keys);
+      const all = JSON.parse(localStorage.getItem(LS_COMPLETED) || '{}');
+      if(all && typeof all === 'object' && Array.isArray(all[dateKey])) return new Set(all[dateKey]);
     }catch(e){}
     return new Set();
   }
   function saveCompletedForDate(dateKey, keysSet){
     try{
-      localStorage.setItem(LS_COMPLETED, JSON.stringify({date: dateKey, keys: [...keysSet]}));
+      const all = JSON.parse(localStorage.getItem(LS_COMPLETED) || '{}');
+      all[dateKey] = [...keysSet];
+      localStorage.setItem(LS_COMPLETED, JSON.stringify(all));
     }catch(e){}
   }
 
   // ---------- remembered 출발지/도착지 per day (see handleRouteEndpointsForDate) ----------
   // Keyed by the same dateKey as 완료 처리, so a new day's workbook naturally
-  // asks again while the same day never re-prompts once answered.
+  // asks again while a day that was already answered (today or a past one)
+  // never re-prompts once its own entry is loaded back.
   function loadRouteEndpoints(dateKey){
     try{
-      const stored = JSON.parse(localStorage.getItem(LS_ROUTE_ENDPOINTS) || 'null');
-      if(stored && stored.date === dateKey) return stored.value;
+      const all = JSON.parse(localStorage.getItem(LS_ROUTE_ENDPOINTS) || '{}');
+      if(all && typeof all === 'object' && all[dateKey] != null) return all[dateKey];
     }catch(e){}
     return null;
   }
   function saveRouteEndpoints(dateKey, value){
     try{
-      localStorage.setItem(LS_ROUTE_ENDPOINTS, JSON.stringify({date: dateKey, value}));
+      const all = JSON.parse(localStorage.getItem(LS_ROUTE_ENDPOINTS) || '{}');
+      all[dateKey] = value;
+      localStorage.setItem(LS_ROUTE_ENDPOINTS, JSON.stringify(all));
     }catch(e){}
   }
 
@@ -1460,8 +1592,9 @@
   // every currently-active item to a fresh even split of the new total.
   function loadItemTimeState(dateKey){
     try{
-      const stored = JSON.parse(localStorage.getItem(LS_ITEM_TIME) || 'null');
-      if(stored && stored.date === dateKey){
+      const all = JSON.parse(localStorage.getItem(LS_ITEM_TIME) || '{}');
+      const stored = all && typeof all === 'object' ? all[dateKey] : null;
+      if(stored){
         return { cancelled: new Set(stored.cancelled || []), minutes: stored.minutes || {}, fees: stored.fees || {}, hours: stored.hours != null ? stored.hours : null };
       }
     }catch(e){}
@@ -1469,9 +1602,9 @@
   }
   function saveItemTimeState(dateKey, state){
     try{
-      localStorage.setItem(LS_ITEM_TIME, JSON.stringify({
-        date: dateKey, cancelled: [...state.cancelled], minutes: state.minutes, fees: state.fees, hours: state.hours
-      }));
+      const all = JSON.parse(localStorage.getItem(LS_ITEM_TIME) || '{}');
+      all[dateKey] = { cancelled: [...state.cancelled], minutes: state.minutes, fees: state.fees, hours: state.hours };
+      localStorage.setItem(LS_ITEM_TIME, JSON.stringify(all));
     }catch(e){}
   }
   function itemKey(it, idx){
@@ -1550,6 +1683,17 @@
     timeAllocationSummary.textContent =
       `취소 ${itemTimeState.cancelled.size}건 제외 · 진행 ${active.length}건 · 시간 합계 ${formatHoursMinutes(totalMinutes)} · 검사비 합계 ${totalFees.toLocaleString()}원`;
 
+    dailyHoursInput.disabled = currentDateFinalized;
+    showAddTimeProjectBtn.disabled = currentDateFinalized;
+    if(currentDateFinalized){
+      finalizeDayBtn.textContent = '🔒 마감됨 · 해제하기';
+      finalizeDayBtn.classList.add('is-locked');
+      addTimeProjectForm.style.display = 'none';
+    }else{
+      finalizeDayBtn.textContent = '🔒 오늘 마감 (최종 저장)';
+      finalizeDayBtn.classList.remove('is-locked');
+    }
+
     timeAllocationList.innerHTML = items.map(({it, key}) => {
       const cancelled = itemTimeState.cancelled.has(key);
       const minutes = itemTimeState.minutes[key] || 0;
@@ -1558,9 +1702,10 @@
       const isNewProject = /^new$/i.test(projectVal);
       const originTag = it.isManualTimeProject ? '<span class="tag manual">🔧 직접 추가</span>'
         : (it.isManualStopTime ? '<span class="tag manual">📍 방문지</span>' : '');
-      const deleteBtn = it.isManualTimeProject
+      const deleteBtn = (it.isManualTimeProject && !currentDateFinalized)
         ? `<button type="button" class="timecancelbtn" data-delete-time-project-key="${esc(it.manualTimeProjectId)}" style="color:var(--danger); border-color:#F1C4B8;">🗑️ 삭제</button>`
         : '';
+      const rowDisabled = cancelled || currentDateFinalized;
       return `
         <div class="timerow${cancelled ? ' is-cancelled' : ''}">
           <div class="timerow-main">
@@ -1569,14 +1714,14 @@
           </div>
           <div class="timerow-actions">
             <div class="timerow-field">
-              <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${cancelled ? 'disabled' : ''}>
+              <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
               <span class="timeunit">분</span>
             </div>
             <div class="timerow-field">
-              <input type="number" class="feeinput" min="0" step="1000" placeholder="검사비" value="${cancelled ? '' : (fee || '')}" data-fee-key="${esc(key)}" ${cancelled ? 'disabled' : ''}>
+              <input type="number" class="feeinput" min="0" step="1000" placeholder="검사비" value="${cancelled ? '' : (fee || '')}" data-fee-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
               <span class="timeunit">원</span>
             </div>
-            <button type="button" class="timecancelbtn" data-cancel-key="${esc(key)}">${cancelled ? '↺ 복원' : '✕ 취소'}</button>
+            <button type="button" class="timecancelbtn" data-cancel-key="${esc(key)}" ${currentDateFinalized ? 'disabled' : ''}>${cancelled ? '↺ 복원' : '✕ 취소'}</button>
             ${deleteBtn}
           </div>
         </div>`;
@@ -1631,6 +1776,7 @@
     startSelect.value = startId;
     endSelect.value = endId || '';
     saveRouteEndpoints(dateKey, {startPlaceId: startId, endPlaceId: endId || ''});
+    pushRouteEndpointsToGist();
     await performOptimization(startId, endId || '');
   }
 
@@ -1701,14 +1847,18 @@
     await pushProjectOverridesToGist();
     await pushManualTimeProjectsToGist();
     await pushTimeAllocationToGist();
+    await pushCompletedToGist();
+    await pushRouteEndpointsToGist();
+    await pushFinalizedToGist();
     resyncStopsBtn.textContent = origLabel;
-    showToast('이 기기의 방문지·주소·Project Number·직접 추가한 프로젝트·시간 배분 내용을 클라우드에 다시 올렸어요');
+    showToast('이 기기의 방문지·주소·Project Number·직접 추가한 프로젝트·시간 배분·완료 처리·출발/도착지·마감 상태를 클라우드에 다시 올렸어요');
   });
   cancelAddStopBtn.addEventListener('click', function(){
     addStopForm.style.display = 'none';
     addStopName.value = ''; addStopAddress.value = '';
   });
   confirmAddStopBtn.addEventListener('click', function(){
+    if(isDateFinalizedGuard()) return;
     const name = addStopName.value.trim();
     const address = addStopAddress.value.trim();
     if(!name || !address){ addStopName.focus(); return; }
@@ -1732,6 +1882,7 @@
     addTimeProjectCustomer.value = ''; addTimeProjectAsset.value = ''; addTimeProjectNumber.value = '';
   });
   confirmAddTimeProjectBtn.addEventListener('click', function(){
+    if(isDateFinalizedGuard()) return;
     const customer = addTimeProjectCustomer.value.trim();
     const asset = addTimeProjectAsset.value.trim();
     const project = addTimeProjectNumber.value.trim();
@@ -1745,6 +1896,21 @@
     addTimeProjectForm.style.display = 'none';
     render();
     pushManualTimeProjectsToGist();
+  });
+
+  finalizeDayBtn.addEventListener('click', function(){
+    if(!itemTimeDateKey){ showToast('먼저 워크북을 불러와 주세요'); return; }
+    if(currentDateFinalized){
+      const ok = window.confirm('🔒 마감을 해제하시겠습니까?\n\n해제하면 완료 처리·시간 배분·방문지 등을 다시 수정할 수 있게 됩니다.');
+      if(!ok) return;
+      setDateFinalized(itemTimeDateKey, false);
+    }else{
+      const ok = window.confirm('오늘 검사 일정을 마감(최종 저장)하시겠습니까?\n\n마감하면 완료 처리·시간 배분·검사비·방문지 추가/삭제 등을 더 이상 수정할 수 없게 잠깁니다. 같은 날짜의 워크북을 다시 불러올 때도 확인 창이 한 번 더 뜹니다.\n\n필요하면 나중에 다시 눌러서 마감을 해제할 수 있어요.');
+      if(!ok) return;
+      setDateFinalized(itemTimeDateKey, true);
+    }
+    render();
+    pushFinalizedToGist();
   });
 
   // ---------- route optimization (Kakao geocoding + nearest-neighbor) ----------
@@ -2137,6 +2303,7 @@
     const ok = await performOptimization(startSelect.value, endSelect.value);
     if(ok && currentRouteDateKey){
       saveRouteEndpoints(currentRouteDateKey, {startPlaceId: startSelect.value, endPlaceId: endSelect.value});
+      pushRouteEndpointsToGist();
     }
   });
 
@@ -2243,6 +2410,7 @@
     const projectEditBtn = e.target.closest('[data-project-edit-key]');
     if(projectEditBtn){
       e.preventDefault();
+      if(isDateFinalizedGuard()) return;
       const key = projectEditBtn.getAttribute('data-project-edit-key');
       const overrides = getProjectOverrides();
       const current = overrides[key] || '';
@@ -2259,6 +2427,7 @@
     const editBtn = e.target.closest('[data-editaddr-key]');
     if(editBtn){
       e.preventDefault();
+      if(isDateFinalizedGuard()) return;
       const key = editBtn.getAttribute('data-editaddr-key');
       const overrides = getAddressOverrides();
       const current = overrides[key] || key;
@@ -2275,6 +2444,7 @@
     const revertBtn = e.target.closest('[data-revertaddr-key]');
     if(revertBtn){
       e.preventDefault();
+      if(isDateFinalizedGuard()) return;
       const key = revertBtn.getAttribute('data-revertaddr-key');
       const overrides = getAddressOverrides();
       delete overrides[key];
@@ -2286,16 +2456,19 @@
     const doneBtn = e.target.closest('[data-toggle-done-key]');
     if(doneBtn){
       e.preventDefault();
+      if(isDateFinalizedGuard()) return;
       const key = doneBtn.getAttribute('data-toggle-done-key');
       if(completedKeys.has(key)) completedKeys.delete(key);
       else completedKeys.add(key);
       if(lastCompletedDateKey) saveCompletedForDate(lastCompletedDateKey, completedKeys);
       render();
+      pushCompletedToGist();
       return;
     }
     const itemCancelBtn = e.target.closest('[data-item-cancel-key]');
     if(itemCancelBtn){
       e.preventDefault();
+      if(isDateFinalizedGuard()) return;
       const key = itemCancelBtn.getAttribute('data-item-cancel-key');
       if(itemTimeState.cancelled.has(key)) itemTimeState.cancelled.delete(key);
       else itemTimeState.cancelled.add(key);
@@ -2307,6 +2480,7 @@
     const deleteManualBtn = e.target.closest('[data-delete-manual-key]');
     if(deleteManualBtn){
       e.preventDefault();
+      if(isDateFinalizedGuard()) return;
       const id = deleteManualBtn.getAttribute('data-delete-manual-key');
       const code = codeInput.value.trim().toUpperCase();
       if(window.confirm('이 직접 추가한 방문지를 삭제할까요?')){
@@ -2453,6 +2627,28 @@
       throw new Error('시트에서 SURVEYOR / LOCATION 헤더를 찾지 못했습니다. 원본 WORK BOOK 형식인지 확인해 주세요.');
     }
     return {items: out, dayText, dateText, surveyorNotes: extractSurveyorNotes(rows)};
+  }
+
+  // Before actually swapping in a newly-picked workbook file (upload, 공유
+  //받은 파일, or the 📩 스테이징 배너), check whether its date is already
+  // 🔒 마감(최종 저장) for this 검사관코드. Re-parsing a finalized day would
+  // otherwise silently reshuffle its groups/항목 against 완료 처리·시간
+  // 배분 that were already locked in as final. Returns false if the person
+  // cancels -- callers should abort the load in that case.
+  function confirmIfFinalizedReupload(rows){
+    try{
+      const probe = parseWorkbook(rows);
+      const probeCode = codeInput.value.trim().toUpperCase();
+      const probeDateKey = (probe.dateText || probe.dayText || 'unknown') + '|' + probeCode;
+      if(isDateFinalized(probeDateKey)){
+        return window.confirm(
+          '🔒 ' + (probe.dateText || probe.dayText || '이 날짜') + '는 이미 마감(최종 저장) 처리된 날짜입니다.\n\n' +
+          '다시 불러오면 방문지/항목 목록이 새 워크북 내용으로 갱신됩니다. 이미 저장해 둔 완료 처리·시간 배분·검사비 값은 그대로 남아있지만, 워크북 내용이 바뀌었다면 서로 어긋날 수 있어요.\n\n' +
+          '그래도 다시 불러오시겠습니까?'
+        );
+      }
+    }catch(e){ /* probe parse failing here is fine -- the real load below will surface the real error */ }
+    return true;
   }
 
   function groupItems(items){
@@ -2608,8 +2804,8 @@
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-          <button type="button" class="donebtn" data-toggle-done-key="${esc(gKey)}">${isDone ? '✅ 완료됨' : '검사전'}</button>
-          ${g.isManual ? `<button type="button" class="donebtn" data-delete-manual-key="${esc(g.manualId)}" style="color:var(--danger); border-color:#F1C4B8;">🗑️ 삭제</button>` : ''}
+          <button type="button" class="donebtn" data-toggle-done-key="${esc(gKey)}" ${currentDateFinalized ? 'disabled' : ''}>${isDone ? '✅ 완료됨' : '검사전'}</button>
+          ${g.isManual ? `<button type="button" class="donebtn" data-delete-manual-key="${esc(g.manualId)}" style="color:var(--danger); border-color:#F1C4B8;" ${currentDateFinalized ? 'disabled' : ''}>🗑️ 삭제</button>` : ''}
         </div>
       </div>`;
 
@@ -2630,8 +2826,8 @@
       <div class="addrline">
         <span class="addrtext">${esc(addressForMap)}</span>
         ${isOverridden ? '<span class="addrbadge">수정됨</span>' : ''}
-        <button type="button" class="addrbtn" data-editaddr-key="${esc(rawAddress)}" title="주소 수정">✏️</button>
-        ${isOverridden ? `<button type="button" class="addrbtn" data-revertaddr-key="${esc(rawAddress)}" title="원본 주소로 되돌리기">↺</button>` : ''}
+        <button type="button" class="addrbtn" data-editaddr-key="${esc(rawAddress)}" title="주소 수정" ${currentDateFinalized ? 'disabled' : ''}>✏️</button>
+        ${isOverridden ? `<button type="button" class="addrbtn" data-revertaddr-key="${esc(rawAddress)}" title="원본 주소로 되돌리기" ${currentDateFinalized ? 'disabled' : ''}>↺</button>` : ''}
       </div>` : '';
 
     const itemsHtml = itemsForRender.map(it=>{
@@ -2652,8 +2848,8 @@
           <div class="item-top">
             <span class="item-asset${iCancelled ? ' strike' : ''}">${esc(it.asset || '(품목 미기재)')}</span>
             <div class="item-top-actions">
-              <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" title="Project Number 수정">${esc(projectVal)}</button>
-              <button type="button" class="itemcancelbtn" data-item-cancel-key="${esc(iKey)}" title="시간 배분에서도 함께 반영돼요">${iCancelled ? '↺ 복원' : '🗑️ 삭제'}</button>
+              <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" title="Project Number 수정" ${currentDateFinalized ? 'disabled' : ''}>${esc(projectVal)}</button>
+              <button type="button" class="itemcancelbtn" data-item-cancel-key="${esc(iKey)}" title="시간 배분에서도 함께 반영돼요" ${currentDateFinalized ? 'disabled' : ''}>${iCancelled ? '↺ 복원' : '🗑️ 삭제'}</button>
             </div>
           </div>
           <span class="item-id">Work Book #${esc(it.id || '—')}</span>
@@ -2702,6 +2898,7 @@
     }
 
     const dateKey = (parsed.dateText || parsed.dayText || 'unknown') + '|' + code;
+    currentDateFinalized = isDateFinalized(dateKey);
     if(dateKey !== lastCompletedDateKey){
       completedKeys = loadCompletedForDate(dateKey);
       lastCompletedDateKey = dateKey;
@@ -2820,6 +3017,7 @@
       remoteGroups.forEach(g=>{ html += renderGroup(g, order++); });
     }
     stopsList.innerHTML = html;
+    showAddStopBtn.disabled = currentDateFinalized;
 
     // "⏱ 시간 배분" covers everything for the day -- workbook 배정 건은 물론,
     // 방문지 추가로 만든 동선(자동 반영)과 동선 없이 단독으로 추가한 프로젝트
@@ -2836,6 +3034,7 @@
       const sheetName = wb.SheetNames[0];
       const sheet = wb.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      if(!confirmIfFinalizedReupload(rows)) return;
       lastWorkbookRows = rows;
       lastOptimizedOrder = null;
       lastRouteMeta = null;
@@ -2930,6 +3129,9 @@
       await pullProjectOverridesFromGist();
       await pullManualTimeProjectsFromGist();
       await pullTimeAllocationFromGist();
+      await pullCompletedFromGist();
+      await pullRouteEndpointsFromGist();
+      await pullFinalizedFromGist();
     }else{
       setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
     }
