@@ -497,6 +497,11 @@
       <span class="filename" id="fileMeta"></span>
       <button class="resetlink" id="resetBtn">초기화</button>
     </div>
+    <div class="row" id="archiveRow">
+      <label class="field-label" for="archiveSelect">지난 날짜</label>
+      <select id="archiveSelect" style="flex:1; min-width:0;"><option value="">보관된 날짜 불러오기</option></select>
+      <button type="button" class="smallbtn" id="loadArchiveBtn">불러오기</button>
+    </div>
 
     <div class="syncrow">
       <span id="syncStatus">동기화 미설정</span>
@@ -734,6 +739,8 @@
   const codeInput = document.getElementById('codeInput');
   const fileInput = document.getElementById('fileInput');
   const fileMetaRow = document.getElementById('fileMetaRow');
+  const archiveSelect = document.getElementById('archiveSelect');
+  const loadArchiveBtn = document.getElementById('loadArchiveBtn');
   const fileMeta = document.getElementById('fileMeta');
   const resetBtn = document.getElementById('resetBtn');
   const syncStatus = document.getElementById('syncStatus');
@@ -962,6 +969,7 @@
   const COMPLETED_FILENAME = 'completed-stops.json';
   const ROUTE_ENDPOINTS_FILENAME = 'route-endpoints.json';
   const FINALIZED_FILENAME = 'finalized-days.json';
+  const WORKBOOK_ARCHIVE_FILENAME = 'workbook-archive.json';
   const LS_KAKAO_KEY = 'daily-route-kakao-key';
   const LS_KAKAO_JS_KEY = 'daily-route-kakao-js-key';
   const LS_SURVEYOR_CODE = 'daily-route-surveyor-code';
@@ -974,6 +982,7 @@
   const LS_PROJECT_OVERRIDES = 'daily-route-project-overrides';
   const LS_MANUAL_TIME_PROJECTS = 'daily-route-manual-time-projects';
   const LS_FINALIZED = 'daily-route-finalized-dates';
+  const LS_WORKBOOK_ARCHIVE = 'daily-route-workbook-archive';
 
   let lastWorkbookRows = null;
   let lastOptimizedOrder = null; // array of group keys in visiting order
@@ -1307,6 +1316,30 @@
     }
   }
 
+  // ---------- syncing 엑셀 원본 보관함 across an inspector's own devices ----------
+  async function pushWorkbookArchiveToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const raw = localStorage.getItem(LS_WORKBOOK_ARCHIVE);
+    if(!raw) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({ files: { [WORKBOOK_ARCHIVE_FILENAME]: { content: raw } } })
+      });
+    }catch(e){ /* best-effort */ }
+  }
+  async function pullWorkbookArchiveFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, WORKBOOK_ARCHIVE_FILENAME);
+    if(data && typeof data === 'object' && !Array.isArray(data)){
+      try{ localStorage.setItem(LS_WORKBOOK_ARCHIVE, JSON.stringify(data)); }catch(e){}
+      refreshArchiveSelect();
+    }
+  }
+
   function showSyncCode(token, gistId){
     const code = token + '::' + gistId;
     syncCodeText.textContent = code;
@@ -1415,6 +1448,7 @@
     await pullCompletedFromGist();
     await pullRouteEndpointsFromGist();
     await pullFinalizedFromGist();
+    await pullWorkbookArchiveFromGist();
     render();
     await checkStagingWorkbook();
   });
@@ -1472,11 +1506,14 @@
     const rows = pendingStaging.rows;
     const stagedAt = pendingStaging.stagedAt;
     if(!confirmIfFinalizedReupload(rows)) return;
+    const archiveInfo = computeDateKeyForRows(rows);
+    if(archiveInfo) saveWorkbookToArchive(archiveInfo.dateKey, rows, archiveInfo.dateLabel, '자동 수신 워크북');
     lastWorkbookRows = rows;
     lastOptimizedOrder = null;
     lastRouteMeta = null;
     mapPanel.style.display = 'none';
     render();
+    refreshArchiveSelect();
     try{ localStorage.setItem(LS_STAGING_SEEN, stagedAt); }catch(e){}
     pendingStaging = null;
     renderStagingBanner();
@@ -1486,6 +1523,7 @@
       setSyncStatus('업로드 중…');
       try{
         await pushGist(token, gistId, rows);
+        await pushWorkbookArchiveToGist();
         setSyncStatus('☁️ 방금 동기화됨', 'ok');
       }catch(err){
         setSyncStatus(err.message, 'warn');
@@ -1545,6 +1583,60 @@
     if(finalized) map[dateKey] = { at: new Date().toISOString() };
     else delete map[dateKey];
     saveFinalizedDates(map);
+  }
+
+  // ---------- 엑셀 원본 보관 (Revision 재업로드 시 최신 것만 남김) ----------
+  // Keyed by the same dateKey as everything else, so re-uploading a Revision
+  // for a date that's already archived simply overwrites that one entry --
+  // there's no separate "old version" to clean up, only ever one file per
+  // date. Kept for WORKBOOK_ARCHIVE_RETENTION_DAYS so storage doesn't grow
+  // forever; loadWorkbookFromArchive()/선택해서 불러오기 only ever needs the
+  // last week or two anyway.
+  const WORKBOOK_ARCHIVE_RETENTION_DAYS = 21;
+  function loadWorkbookArchive(){
+    try{
+      const v = JSON.parse(localStorage.getItem(LS_WORKBOOK_ARCHIVE) || '{}');
+      return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+    }catch(e){ return {}; }
+  }
+  function pruneWorkbookArchive(all){
+    const cutoff = Date.now() - WORKBOOK_ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    Object.keys(all).forEach(k => {
+      const t = all[k] && all[k].uploadedAt ? Date.parse(all[k].uploadedAt) : NaN;
+      if(!isNaN(t) && t < cutoff) delete all[k];
+    });
+    return all;
+  }
+  function saveWorkbookToArchive(dateKey, rows, dateLabel, fileLabel){
+    try{
+      const all = pruneWorkbookArchive(loadWorkbookArchive());
+      all[dateKey] = { rows, dateLabel: dateLabel || '', fileLabel: fileLabel || '', uploadedAt: new Date().toISOString() };
+      localStorage.setItem(LS_WORKBOOK_ARCHIVE, JSON.stringify(all));
+    }catch(e){ /* archiving is best-effort -- the live workbook load itself must not fail because of this */ }
+  }
+  function loadWorkbookFromArchive(dateKey){
+    const all = loadWorkbookArchive();
+    return all[dateKey] || null;
+  }
+  // Figures out which dateKey a freshly-picked workbook file belongs to,
+  // without committing it to lastWorkbookRows -- used both to guard against
+  // a 🔒 마감된 날짜 reupload and to file the archive entry under the right key.
+  function computeDateKeyForRows(rows){
+    try{
+      const probe = parseWorkbook(rows);
+      const code = codeInput.value.trim().toUpperCase();
+      const dateLabel = probe.dateText || probe.dayText || '';
+      return { dateKey: (dateLabel || 'unknown') + '|' + code, dateLabel, code };
+    }catch(e){ return null; }
+  }
+  function refreshArchiveSelect(){
+    const all = loadWorkbookArchive();
+    const entries = Object.keys(all).map(k => ({ dateKey: k, ...all[k] }))
+      .sort((a,b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+    const prevValue = archiveSelect.value;
+    archiveSelect.innerHTML = '<option value="">보관된 날짜 불러오기</option>' +
+      entries.map(en => `<option value="${esc(en.dateKey)}">${esc(en.dateLabel || en.dateKey.split('|')[0])} · ${esc(en.dateKey.split('|').slice(1).join('|'))}</option>`).join('');
+    if(entries.some(en => en.dateKey === prevValue)) archiveSelect.value = prevValue;
   }
 
   function loadCompletedForDate(dateKey){
@@ -1850,8 +1942,9 @@
     await pushCompletedToGist();
     await pushRouteEndpointsToGist();
     await pushFinalizedToGist();
+    await pushWorkbookArchiveToGist();
     resyncStopsBtn.textContent = origLabel;
-    showToast('이 기기의 방문지·주소·Project Number·직접 추가한 프로젝트·시간 배분·완료 처리·출발/도착지·마감 상태를 클라우드에 다시 올렸어요');
+    showToast('이 기기의 방문지·주소·Project Number·직접 추가한 프로젝트·시간 배분·완료 처리·출발/도착지·마감 상태·엑셀 보관함을 클라우드에 다시 올렸어요');
   });
   cancelAddStopBtn.addEventListener('click', function(){
     addStopForm.style.display = 'none';
@@ -2637,12 +2730,10 @@
   // cancels -- callers should abort the load in that case.
   function confirmIfFinalizedReupload(rows){
     try{
-      const probe = parseWorkbook(rows);
-      const probeCode = codeInput.value.trim().toUpperCase();
-      const probeDateKey = (probe.dateText || probe.dayText || 'unknown') + '|' + probeCode;
-      if(isDateFinalized(probeDateKey)){
+      const info = computeDateKeyForRows(rows);
+      if(info && isDateFinalized(info.dateKey)){
         return window.confirm(
-          '🔒 ' + (probe.dateText || probe.dayText || '이 날짜') + '는 이미 마감(최종 저장) 처리된 날짜입니다.\n\n' +
+          '🔒 ' + (info.dateLabel || '이 날짜') + '는 이미 마감(최종 저장) 처리된 날짜입니다.\n\n' +
           '다시 불러오면 방문지/항목 목록이 새 워크북 내용으로 갱신됩니다. 이미 저장해 둔 완료 처리·시간 배분·검사비 값은 그대로 남아있지만, 워크북 내용이 바뀌었다면 서로 어긋날 수 있어요.\n\n' +
           '그래도 다시 불러오시겠습니까?'
         );
@@ -3035,6 +3126,8 @@
       const sheet = wb.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
       if(!confirmIfFinalizedReupload(rows)) return;
+      const archiveInfo = computeDateKeyForRows(rows);
+      if(archiveInfo) saveWorkbookToArchive(archiveInfo.dateKey, rows, archiveInfo.dateLabel, displayName);
       lastWorkbookRows = rows;
       lastOptimizedOrder = null;
       lastRouteMeta = null;
@@ -3042,12 +3135,14 @@
       fileMeta.textContent = displayName;
       fileMetaRow.style.display = '';
       render();
+      refreshArchiveSelect();
 
       const {token, gistId} = getDeviceConfig();
       if(token && gistId){
         setSyncStatus('업로드 중…');
         try{
           await pushGist(token, gistId, rows);
+          await pushWorkbookArchiveToGist();
           setSyncStatus('☁️ 방금 동기화됨', 'ok');
         }catch(err){
           setSyncStatus(err.message, 'warn');
@@ -3070,6 +3165,29 @@
       showError('파일을 읽지 못했습니다. 다시 시도해 주세요.');
     };
     reader.readAsArrayBuffer(file);
+  });
+
+  // ---------- 📂 지난 날짜 불러오기 (보관된 엑셀 원본 + 그날 저장된 데이터를 함께 복원) ----------
+  loadArchiveBtn.addEventListener('click', function(){
+    const dateKey = archiveSelect.value;
+    if(!dateKey){ showToast('불러올 날짜를 선택해 주세요'); return; }
+    const entry = loadWorkbookFromArchive(dateKey);
+    if(!entry || !entry.rows){ showToast('보관된 데이터를 찾지 못했어요'); return; }
+    // The archived entry's code (part after "|") must match codeInput so
+    // render() filters 담당 업무 the same way it did when this was saved --
+    // 완료 처리/시간 배분/마감 상태 are all keyed off that same dateKey too,
+    // so they come back automatically once lastWorkbookRows + code line up.
+    const parts = dateKey.split('|');
+    const savedCode = parts.length > 1 ? parts[parts.length - 1] : '';
+    if(savedCode) codeInput.value = savedCode;
+    lastWorkbookRows = entry.rows;
+    lastOptimizedOrder = null;
+    lastRouteMeta = null;
+    mapPanel.style.display = 'none';
+    fileMeta.textContent = '📂 ' + (entry.dateLabel || dateKey) + ' (보관된 워크북)' + (entry.fileLabel ? ' · ' + entry.fileLabel : '');
+    fileMetaRow.style.display = '';
+    render();
+    showToast('📂 ' + (entry.dateLabel || dateKey) + ' 데이터를 불러왔어요');
   });
 
   // ---------- receiving a file shared via the OS share sheet (Android/Chrome PWA) ----------
@@ -3132,10 +3250,12 @@
       await pullCompletedFromGist();
       await pullRouteEndpointsFromGist();
       await pullFinalizedFromGist();
+      await pullWorkbookArchiveFromGist();
     }else{
       setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
     }
     render();
+    refreshArchiveSelect();
     await checkForSharedFile();
     await checkStagingWorkbook();
   })();
