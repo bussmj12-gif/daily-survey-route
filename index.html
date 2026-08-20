@@ -2212,14 +2212,29 @@
       const map = new kakao.maps.Map(canvas, {center, level: 8});
       const bounds = new kakao.maps.LatLngBounds();
 
+      // Two stops that are geographically close (e.g. 양산 바로 옆 부산 지점)
+      // can end up with their label overlays fully stacked, hiding whichever
+      // one was drawn first -- there's no way to tell it's even there. Give
+      // each marker a zIndex and bump it (and its overlay) to the very front
+      // on tap, so any hidden stop can always be pulled out from underneath.
+      let topZIndex = 100;
+
       nodes.forEach(n=>{
         const pos = new kakao.maps.LatLng(n.lat, n.lng);
         bounds.extend(pos);
-        new kakao.maps.Marker({position: pos, map});
+        const marker = new kakao.maps.Marker({position: pos, map, zIndex: topZIndex});
         const label = n.kind === 'stop' ? String(n.order) : (n.kind === 'start' ? '출발' : '도착');
         const content = `<div class="map-pin ${n.kind}">${esc(label)} ${esc(n.name)}</div>`;
-        const overlay = new kakao.maps.CustomOverlay({position: pos, content, yAnchor: 2.1});
+        const overlay = new kakao.maps.CustomOverlay({position: pos, content, yAnchor: 2.1, zIndex: topZIndex});
         overlay.setMap(map);
+        topZIndex++;
+
+        kakao.maps.event.addListener(marker, 'click', function(){
+          topZIndex++;
+          marker.setZIndex(topZIndex);
+          overlay.setZIndex(topZIndex);
+          map.panTo(pos);
+        });
       });
 
       map.setBounds(bounds);
@@ -2289,7 +2304,6 @@
     // -- the inspector may deliberately want to route back). Every OTHER
     // completed stop still gets excluded from the route below.
     let manualChosenKeys = [];
-    let manualChosenGroups = [];
     if(orderMode === 'manual'){
       const rawInputs = [manualPriorityInput1.value, manualPriorityInput2.value, manualPriorityInput3.value];
       for(const raw of rawInputs){
@@ -2303,7 +2317,6 @@
         const key = groupKey(chosenDisplay);
         if(manualChosenKeys.includes(key)) continue; // same stop picked twice -- ignore the repeat
         manualChosenKeys.push(key);
-        manualChosenGroups.push(chosenDisplay);
       }
       if(manualChosenKeys.length === 0){
         setRouteStatus('1순위 방문지 번호를 입력해 주세요', 'warn');
@@ -2314,6 +2327,15 @@
 
     const groups = allOnsite.filter(g => !completedKeys.has(groupKey(g)) || manualChosenKeySet.has(groupKey(g)));
     if(groups.length === 0){ setRouteStatus('최적화할 방문 지점이 없습니다 (완료 처리된 곳은 제외됩니다)', 'warn'); return false; }
+
+    // lastRenderedOnsiteGroups (used just above to interpret which number the
+    // inspector typed) is a snapshot from the LAST render() pass -- a
+    // different set of objects than `groups` right above, which this run's
+    // geocoding/coordByGroup below is keyed off of by reference. Re-resolving
+    // by groupKey here means `ordered` only ever holds this run's own
+    // objects, so a manually-prioritized stop can't silently fail to match
+    // and drop off the map the way it did before this fix.
+    const manualChosenGroups = manualChosenKeys.map(k => groups.find(g => groupKey(g) === k)).filter(Boolean);
 
     setRouteStatus('좌표 변환 중… (0/' + (groups.length + 1) + ')');
     let done = 0;
@@ -2400,6 +2422,19 @@
       });
       if(endCoord) mapNodes.push({name: endPlace.name, lat: endCoord.lat, lng: endCoord.lng, kind: 'end'});
       renderMap(mapNodes);
+
+      // Sanity check: every group with a resolved coordinate should have
+      // become a mapNode. If the count doesn't match, something dropped a
+      // stop silently (an actual bug) rather than it just being visually
+      // stuck under another overlapping label -- surface that explicitly
+      // instead of leaving it to look like the map is simply wrong.
+      const mappedStopCount = mapNodes.filter(n => n.kind === 'stop').length;
+      if(mappedStopCount !== usable.length){
+        const mappedNames = new Set(mapNodes.filter(n => n.kind === 'stop').map(n => n.name));
+        const missing = usable.filter(u => !mappedNames.has(u.group.customer)).map(u => u.group.customer);
+        routeStatus.textContent += ` · ⚠️ 좌표는 찾았지만 지도에 표시되지 않은 지점 ${missing.length}건: ${missing.join(', ')} (겹친 라벨 밑에 있을 수 있으니 지도에서 그 근처 마커를 눌러보세요)`;
+        routeStatus.style.color = 'var(--danger)';
+      }
     }
     return true;
   }
