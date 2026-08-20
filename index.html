@@ -427,6 +427,7 @@
     width:56px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
     border:1.5px solid var(--border); border-radius:8px; padding:6px 4px; color:var(--ink);
   }
+  .timebox-hours input:disabled{background:var(--bg); color:var(--ink); opacity:1; -webkit-text-fill-color:var(--ink);}
   .timebox-summary{font-size:12.5px; color:var(--ink-soft); margin:10px 0 4px;}
   .timerow{
     display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px dashed var(--border); flex-wrap:wrap;
@@ -450,6 +451,11 @@
   }
   .timeinput:disabled, .feeinput:disabled{background:var(--bg); color:var(--ink-faint);}
   .timeunit{font-size:11.5px; color:var(--ink-soft);}
+  .stepbtn{
+    width:28px; height:28px; flex:0 0 auto; border:1.5px solid var(--border); border-radius:8px;
+    background:var(--bg); color:var(--ink-soft); font-size:15px; font-weight:700; line-height:1; cursor:pointer;
+  }
+  .stepbtn:disabled{opacity:.4; cursor:not-allowed;}
   .timecancelbtn{
     border:1.5px solid var(--border); background:var(--bg); color:var(--ink-soft); border-radius:8px;
     padding:6px 9px; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap;
@@ -689,7 +695,7 @@
       </div>
       <div class="timebox-hours">
         <label for="dailyHoursInput">하루 근무시간</label>
-        <input type="number" id="dailyHoursInput" min="1" max="24" step="0.5" value="7">시간
+        <input type="number" id="dailyHoursInput" min="1" max="24" step="0.5" value="7" disabled readonly title="진행 중인 항목들의 시간 합계가 자동으로 표시됩니다">시간
       </div>
     </div>
     <p class="timebox-summary" id="timeAllocationSummary"></p>
@@ -723,7 +729,7 @@
       <button type="button" class="smallbtn" id="exportTimeExcelBtn">📊 엑셀로 내보내기</button>
       <button type="button" class="smallbtn" id="printTimeBtn">🖨️ 인쇄</button>
     </div>
-    <p class="timebox-note">항목을 취소하거나 시간을 직접 고치면, 그만큼 위 "하루 근무시간" 합계도 함께 줄거나 늘어요 (다른 항목엔 영향 없음). "하루 근무시간" 칸에 새 숫자를 입력하면, 그 시점의 진행 중인 항목들에 새 시간을 다시 균등하게 나눠 담습니다. 검사비는 자동 배분 없이 직접 입력한 값만 반영됩니다.</p>
+    <p class="timebox-note">"하루 근무시간"은 진행 중인 항목들의 시간 합계를 자동으로 보여주는 값이라 직접 수정할 수 없어요. 항목을 취소하거나 개별 시간을 고치면(－/＋ 버튼 또는 직접 입력) 그만큼 이 합계도 함께 줄거나 늘어요 (다른 항목엔 영향 없음). 검사비는 자동 배분 없이 직접 입력한 값만 반영됩니다.</p>
   </div>
 
   <footer>
@@ -821,6 +827,22 @@
   });
 
   timeAllocationList.addEventListener('click', function(e){
+    const stepBtn = e.target.closest('[data-time-step-key]');
+    if(stepBtn){
+      // Mobile number inputs don't show up/down steppers, so typing a new
+      // 분 value means tapping into the field and typing digits every time.
+      // These ＋/－ buttons give a one-tap 15분 step instead.
+      if(isDateFinalizedGuard()) return;
+      const key = stepBtn.getAttribute('data-time-step-key');
+      const delta = parseInt(stepBtn.getAttribute('data-time-step-delta'), 10) || 0;
+      if(itemTimeState.cancelled.has(key)) return; // cancelled rows keep the input disabled
+      const current = itemTimeState.minutes[key] || 0;
+      itemTimeState.minutes[key] = Math.max(0, current + delta);
+      if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
+      render();
+      pushTimeAllocationToGist();
+      return;
+    }
     const delProjectBtn = e.target.closest('[data-delete-time-project-key]');
     if(delProjectBtn){
       if(isDateFinalizedGuard()) return;
@@ -866,23 +888,11 @@
       pushTimeAllocationToGist();
     }
   });
-  dailyHoursInput.addEventListener('change', function(){
-    if(isDateFinalizedGuard()){ render(); return; }
-    // Explicitly editing 하루 근무시간 is the one action that resets every
-    // currently-active item back to a fresh even split of the new total --
-    // everywhere else (cancel, per-item edit), 하루 근무시간 just displays
-    // the live sum without forcing a redistribution.
-    const v = parseFloat(dailyHoursInput.value);
-    const hours = isNaN(v) ? 7 : v;
-    const items = lastMineForTimeAllocation.map((it, idx) => ({ it, key: itemKey(it, idx) }));
-    const active = items.filter(x => !itemTimeState.cancelled.has(x.key));
-    const blocks = distributeMinutesBlocks(Math.round(hours * 60), active.length);
-    active.forEach((x,i) => { itemTimeState.minutes[x.key] = blocks[i]; });
-    itemTimeState.hours = hours;
-    if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
-    render();
-    pushTimeAllocationToGist();
-  });
+  // 하루 근무시간 is a read-only computed display now (see renderTimeAllocation) --
+  // it always mirrors the live sum of active items' 분, and can't be typed
+  // into to force a redistribution. The only way to change the total is to
+  // change individual items' 시간 (directly, or with the ＋/－ steppers), or
+  // 취소/복원 an item.
 
   // Builds the shared row data (used by both the Excel export and print view)
   // from the currently-rendered time allocation state.
@@ -1775,7 +1785,7 @@
     timeAllocationSummary.textContent =
       `취소 ${itemTimeState.cancelled.size}건 제외 · 진행 ${active.length}건 · 시간 합계 ${formatHoursMinutes(totalMinutes)} · 검사비 합계 ${totalFees.toLocaleString()}원`;
 
-    dailyHoursInput.disabled = currentDateFinalized;
+    dailyHoursInput.disabled = true; // always read-only -- see note by its (removed) change listener
     showAddTimeProjectBtn.disabled = currentDateFinalized;
     if(currentDateFinalized){
       finalizeDayBtn.textContent = '🔒 마감됨 · 해제하기';
@@ -1806,8 +1816,10 @@
           </div>
           <div class="timerow-actions">
             <div class="timerow-field">
+              <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="-15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 줄이기">－</button>
               <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
               <span class="timeunit">분</span>
+              <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 늘리기">＋</button>
             </div>
             <div class="timerow-field">
               <input type="number" class="feeinput" min="0" step="1000" placeholder="검사비" value="${cancelled ? '' : (fee || '')}" data-fee-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
