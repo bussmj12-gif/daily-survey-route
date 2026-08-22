@@ -249,6 +249,11 @@
     width:100%; font-size:14px; padding:10px 10px; border:1.5px solid var(--border); border-radius:9px;
     background:#fff; color:var(--ink);
   }
+  #projectEditWorkbook{color:var(--accent); letter-spacing:.02em;}
+  #projectEditInput{
+    width:100%; font-size:15px; padding:11px 12px; border:1.5px solid var(--border); border-radius:9px;
+    background:#fff; color:var(--ink); box-sizing:border-box; font-family:'Space Mono',monospace;
+  }
 
   .stagingbanner{
     margin-top:14px; background:linear-gradient(135deg,#FFF3E6,#FFE7D6); border:1.5px solid var(--accent);
@@ -643,6 +648,17 @@
     </div>
   </div>
 
+  <div id="projectEditModal" class="modaloverlay" style="display:none;">
+    <div class="modalbox">
+      <p class="modaltitle" id="projectEditWorkbook" style="font-family:'Space Mono',monospace; font-size:22px;"></p>
+      <input type="text" id="projectEditInput" placeholder="예: BUS2610419, CHA..., SEO...">
+      <div class="btnrow" style="margin-top:14px;">
+        <button type="button" class="smallbtn primary" id="projectEditSaveBtn">저장</button>
+        <button type="button" class="smallbtn" id="projectEditCancelBtn">취소</button>
+      </div>
+    </div>
+  </div>
+
   <div class="routestrip" id="routeStrip" style="display:none;"></div>
   <div class="mappanel" id="mapPanel" style="display:none; position:relative;">
     <button type="button" id="closeMapBtn" class="mapclosebtn" title="지도 닫기">✕</button>
@@ -804,6 +820,11 @@
   const modalPlaceSelect = document.getElementById('modalPlaceSelect');
   const modalConfirmBtn = document.getElementById('modalConfirmBtn');
   const modalSkipBtn = document.getElementById('modalSkipBtn');
+  const projectEditModal = document.getElementById('projectEditModal');
+  const projectEditWorkbook = document.getElementById('projectEditWorkbook');
+  const projectEditInput = document.getElementById('projectEditInput');
+  const projectEditSaveBtn = document.getElementById('projectEditSaveBtn');
+  const projectEditCancelBtn = document.getElementById('projectEditCancelBtn');
   const statusFlagsEl = document.getElementById('statusFlags');
   const mapPanel = document.getElementById('mapPanel');
   const closeMapBtn = document.getElementById('closeMapBtn');
@@ -1856,6 +1877,43 @@
     });
   }
 
+  // Custom modal for editing a Project Number override, replacing the old
+  // window.prompt() -- a native prompt always shows the page's own origin
+  // ("bussmj12-gif.github.io says…") above the message with no way to hide
+  // or restyle it, so anything that needs to stand out (like the Work Book
+  // #) has to live inside our own markup instead.
+  function openProjectEditModal(key, workbookId){
+    const overrides = getProjectOverrides();
+    projectEditWorkbook.textContent = 'Work Book #' + (workbookId || '—');
+    projectEditInput.value = overrides[key] || '';
+    projectEditModal.style.display = '';
+    projectEditInput.focus();
+    function cleanup(){
+      projectEditModal.style.display = 'none';
+      projectEditSaveBtn.removeEventListener('click', onSave);
+      projectEditCancelBtn.removeEventListener('click', onCancel);
+      projectEditInput.removeEventListener('keydown', onKeydown);
+    }
+    function onSave(){
+      const next = projectEditInput.value.trim();
+      const ov = getProjectOverrides();
+      if(next) ov[key] = next;
+      else delete ov[key];
+      saveProjectOverrides(ov);
+      cleanup();
+      render();
+      pushProjectOverridesToGist();
+    }
+    function onCancel(){ cleanup(); }
+    function onKeydown(e){
+      if(e.key === 'Enter') onSave();
+      else if(e.key === 'Escape') onCancel();
+    }
+    projectEditSaveBtn.addEventListener('click', onSave);
+    projectEditCancelBtn.addEventListener('click', onCancel);
+    projectEditInput.addEventListener('keydown', onKeydown);
+  }
+
   // Runs once per day's data (guarded by autoRouteHandledForDateKey in render()):
   // - First time this dateKey is seen: ask 출발지 then 도착지 via popup, save the
   //   answer, then immediately optimize with it.
@@ -2553,22 +2611,7 @@
       if(isDateFinalizedGuard()) return;
       const key = projectEditBtn.getAttribute('data-project-edit-key');
       const workbookId = projectEditBtn.getAttribute('data-project-edit-workbook');
-      const assetName = projectEditBtn.getAttribute('data-project-edit-asset');
-      const overrides = getProjectOverrides();
-      const current = overrides[key] || '';
-      // A card can hold several items -- naming the exact Work Book #/품목
-      // in the prompt itself means there's no need to go find which "New"
-      // button was actually tapped before typing the number.
-      const whichLine = (workbookId || assetName)
-        ? `Work Book #${workbookId || '—'}${assetName ? ' · ' + assetName : ''}\n\n` : '';
-      const next = window.prompt(whichLine + 'Project Number를 입력하세요 (예: BUS2610419, CHA..., SEO...)\n확정 전이면 비워두거나 "New"로 남겨두세요.', current);
-      if(next !== null){
-        if(next.trim()) overrides[key] = next.trim();
-        else delete overrides[key];
-        saveProjectOverrides(overrides);
-        render();
-        pushProjectOverridesToGist();
-      }
+      openProjectEditModal(key, workbookId);
       return;
     }
     const editBtn = e.target.closest('[data-editaddr-key]');
@@ -2993,7 +3036,7 @@
           <div class="item-top">
             <span class="item-asset${iCancelled ? ' strike' : ''}">${esc(it.asset || '(품목 미기재)')}</span>
             <div class="item-top-actions">
-              <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" data-project-edit-workbook="${esc(it.id || '')}" data-project-edit-asset="${esc(it.asset || '')}" title="Project Number 수정" ${currentDateFinalized ? 'disabled' : ''}>${esc(projectVal)}</button>
+              <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" data-project-edit-workbook="${esc(it.id || '')}" title="Project Number 수정" ${currentDateFinalized ? 'disabled' : ''}>${esc(projectVal)}</button>
               <button type="button" class="itemcancelbtn" data-item-cancel-key="${esc(iKey)}" title="시간 배분에서도 함께 반영돼요" ${currentDateFinalized ? 'disabled' : ''}>${iCancelled ? '↺ 복원' : '🗑️ 삭제'}</button>
             </div>
           </div>
