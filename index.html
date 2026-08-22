@@ -2552,9 +2552,16 @@
       e.preventDefault();
       if(isDateFinalizedGuard()) return;
       const key = projectEditBtn.getAttribute('data-project-edit-key');
+      const workbookId = projectEditBtn.getAttribute('data-project-edit-workbook');
+      const assetName = projectEditBtn.getAttribute('data-project-edit-asset');
       const overrides = getProjectOverrides();
       const current = overrides[key] || '';
-      const next = window.prompt('Project Number를 입력하세요 (예: BUS2610419, CHA..., SEO...)\n확정 전이면 비워두거나 "New"로 남겨두세요.', current);
+      // A card can hold several items -- naming the exact Work Book #/품목
+      // in the prompt itself means there's no need to go find which "New"
+      // button was actually tapped before typing the number.
+      const whichLine = (workbookId || assetName)
+        ? `Work Book #${workbookId || '—'}${assetName ? ' · ' + assetName : ''}\n\n` : '';
+      const next = window.prompt(whichLine + 'Project Number를 입력하세요 (예: BUS2610419, CHA..., SEO...)\n확정 전이면 비워두거나 "New"로 남겨두세요.', current);
       if(next !== null){
         if(next.trim()) overrides[key] = next.trim();
         else delete overrides[key];
@@ -2986,7 +2993,7 @@
           <div class="item-top">
             <span class="item-asset${iCancelled ? ' strike' : ''}">${esc(it.asset || '(품목 미기재)')}</span>
             <div class="item-top-actions">
-              <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" title="Project Number 수정" ${currentDateFinalized ? 'disabled' : ''}>${esc(projectVal)}</button>
+              <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" data-project-edit-workbook="${esc(it.id || '')}" data-project-edit-asset="${esc(it.asset || '')}" title="Project Number 수정" ${currentDateFinalized ? 'disabled' : ''}>${esc(projectVal)}</button>
               <button type="button" class="itemcancelbtn" data-item-cancel-key="${esc(iKey)}" title="시간 배분에서도 함께 반영돼요" ${currentDateFinalized ? 'disabled' : ''}>${iCancelled ? '↺ 복원' : '🗑️ 삭제'}</button>
             </div>
           </div>
