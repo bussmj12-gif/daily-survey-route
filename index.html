@@ -2844,7 +2844,12 @@
     const map = new Map();
     items.forEach(it=>{
       const remote = isRemote(it.location);
-      const key = (it.customer||'').toUpperCase() + '||' + ((it.address||it.location||'')).toUpperCase();
+      // Ignore whitespace differences when deciding whether two workbook
+      // rows are "the same place" -- "낙동남로 533번길" vs "낙동남로533번길"
+      // is the same address typed with/without a space, and shouldn't split
+      // into two separate cards for the same company.
+      const normForKey = s => (s || '').toUpperCase().replace(/\s+/g, '');
+      const key = normForKey(it.customer) + '||' + normForKey(it.address || it.location);
       if(!map.has(key)){
         const g = {customer: it.customer || '(업체명 미기재)', location: it.location, address: it.address, remote, items: []};
         map.set(key, g);
