@@ -3270,11 +3270,13 @@
   });
 
   // ---------- 📂 지난 날짜 불러오기 (보관된 엑셀 원본 + 그날 저장된 데이터를 함께 복원) ----------
-  loadArchiveBtn.addEventListener('click', function(){
-    const dateKey = archiveSelect.value;
-    if(!dateKey){ showToast('불러올 날짜를 선택해 주세요'); return; }
+  // Shared by the "지난 날짜 · 불러오기" button and by init()'s automatic
+  // fallback below (used when 클라우드 동기화 didn't produce today's workbook,
+  // e.g. because of a 401) -- loads one archived entry into the live view.
+  function loadArchivedWorkbookEntry(dateKey, opts){
+    const silent = opts && opts.silent;
     const entry = loadWorkbookFromArchive(dateKey);
-    if(!entry || !entry.rows){ showToast('보관된 데이터를 찾지 못했어요'); return; }
+    if(!entry || !entry.rows) return false;
     // The archived entry's code (part after "|") must match codeInput so
     // render() filters 담당 업무 the same way it did when this was saved --
     // 완료 처리/시간 배분/마감 상태 are all keyed off that same dateKey too,
@@ -3286,10 +3288,29 @@
     lastOptimizedOrder = null;
     lastRouteMeta = null;
     mapPanel.style.display = 'none';
-    fileMeta.textContent = '📂 ' + (entry.dateLabel || dateKey) + ' (보관된 워크북)' + (entry.fileLabel ? ' · ' + entry.fileLabel : '');
+    fileMeta.textContent = '📂 ' + (entry.dateLabel || dateKey) + ' (보관된 워크북' + (silent ? ', 자동 불러옴' : '') + ')' + (entry.fileLabel ? ' · ' + entry.fileLabel : '');
     fileMetaRow.style.display = '';
+    archiveSelect.value = dateKey;
+    if(!silent) showToast('📂 ' + (entry.dateLabel || dateKey) + ' 데이터를 불러왔어요');
+    return true;
+  }
+
+  loadArchiveBtn.addEventListener('click', function(){
+    const dateKey = archiveSelect.value;
+    if(!dateKey){ showToast('불러올 날짜를 선택해 주세요'); return; }
+    if(!loadArchivedWorkbookEntry(dateKey)){ showToast('보관된 데이터를 찾지 못했어요'); return; }
     render();
-    showToast('📂 ' + (entry.dateLabel || dateKey) + ' 데이터를 불러왔어요');
+    // 지난 날짜 불러오기는 이 기기 안에서만 이뤄지는 로컬 동작이라, 화면 위
+    // "불러오기 실패 (401)" 같은 클라우드 동기화 상태 메시지는 이 동작과
+    // 무관하게 그대로 남아있었다 -- 방치하면 오래된 오류처럼 보이니, 방금
+    // 한 로컬 동작을 반영해 갱신하되, 마지막으로 알려진 동기화 상태가 실제로
+    // 실패였을 때만 그 사실을 계속 같이 알려준다 (조용히 덮어버리지 않게).
+    const wasSyncFailing = syncStatus.classList.contains('warn');
+    if(wasSyncFailing){
+      setSyncStatus('📂 이 기기에 보관된 워크북을 불러왔어요 (참고: ☁ 클라우드 동기화는 아직 실패 상태입니다 — ⚙ 동기화 설정에서 토큰을 다시 확인해 주세요)', 'warn');
+    }else{
+      setSyncStatus('📂 이 기기에 보관된 워크북을 불러왔어요');
+    }
   });
 
   // ---------- receiving a file shared via the OS share sheet (Android/Chrome PWA) ----------
@@ -3356,8 +3377,19 @@
     }else{
       setSyncStatus('동기화 미설정 (⚙ 동기화 설정에서 구성해 주세요)');
     }
-    render();
+
+    // ☁ 클라우드 동기화가 안 됐거나(401 등) 설정 자체가 안 돼 있어서
+    // lastWorkbookRows가 여전히 비어 있으면, 이 기기에 보관된 워크북 중
+    // 가장 최근 것을 자동으로 불러온다 -- "지난 날짜"를 매번 직접 골라야만
+    // 오늘 일정이 뜨는 건 부담이니, 화면을 열자마자 뭐라도 바로 보이게.
     refreshArchiveSelect();
+    if(!lastWorkbookRows){
+      const mostRecent = Object.entries(loadWorkbookArchive())
+        .sort((a,b) => (b[1].uploadedAt || '').localeCompare(a[1].uploadedAt || ''))[0];
+      if(mostRecent) loadArchivedWorkbookEntry(mostRecent[0], {silent: true});
+    }
+
+    render();
     await checkForSharedFile();
     await checkStagingWorkbook();
   })();
