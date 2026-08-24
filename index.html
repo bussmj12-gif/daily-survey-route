@@ -1451,6 +1451,14 @@
     }
     try{
       const data = await pullGist(token, gistId);
+      // A pull that actually succeeds is proof this token/gistId pair
+      // works -- persist it right away rather than requiring a separate
+      // "이 값으로 저장" click. Otherwise, typing a new token and retrying
+      // (which reads straight from the input field) can *look* fixed for
+      // the rest of this session, but a hard page reload (e.g. pull-to-
+      // refresh) reloads the still-unsaved old/expired token from
+      // localStorage and 401s again.
+      saveDeviceConfig(token, gistId);
       if(data.rows){
         lastWorkbookRows = data.rows;
         lastOptimizedOrder = null;
