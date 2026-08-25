@@ -2847,6 +2847,18 @@
     return true;
   }
 
+  // "부산시" vs "부산광역시", "서울시" vs "서울특별시" etc. are the same place
+  // written with/without the full administrative suffix -- collapse them to
+  // one canonical short form so addresses like these group together instead
+  // of splitting into separate cards for the same company.
+  function normCityForm(s){
+    return (s || '')
+      .replace(/특별자치시/g, '시')
+      .replace(/광역시/g, '시')
+      .replace(/특별시/g, '시')
+      .replace(/특별자치도/g, '도');
+  }
+
   function groupItems(items){
     const groups = [];
     const map = new Map();
@@ -2856,7 +2868,7 @@
       // rows are "the same place" -- "낙동남로 533번길" vs "낙동남로533번길"
       // is the same address typed with/without a space, and shouldn't split
       // into two separate cards for the same company.
-      const normForKey = s => (s || '').toUpperCase().replace(/\s+/g, '');
+      const normForKey = s => normCityForm(s || '').toUpperCase().replace(/\s+/g, '');
       const key = normForKey(it.customer) + '||' + normForKey(it.address || it.location);
       if(!map.has(key)){
         const g = {customer: it.customer || '(업체명 미기재)', location: it.location, address: it.address, remote, items: []};
