@@ -418,6 +418,8 @@
     margin-top:4px; background:#FFFBEF; border:1px solid #F3E4B8; border-radius:8px;
     padding:8px 10px; font-size:12.5px; line-height:1.55; color:#7A5C10; white-space:pre-line;
   }
+  .item-fee-row{display:flex; align-items:center; gap:8px; margin-top:8px;}
+  .item-fee-row label{font-size:12px; color:var(--ink-soft); font-weight:600;}
   .memo b{font-weight:700;}
 
   .timebox{
@@ -1783,6 +1785,12 @@
     const h = Math.floor(mins / 60), m = mins % 60;
     return h + '시간' + (m > 0 ? ' ' + m + '분' : '');
   }
+  // Compact form for inline display next to an item's 분 input -- no space,
+  // matching how the inspector actually writes it (예: 1시간30분, 2시간15분).
+  function formatHoursMinutesCompact(mins){
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return h + '시간' + (m > 0 ? m + '분' : '');
+  }
   let lastMineForTimeAllocation = [];
   let lastDateLabelForTimeAllocation = '';
   function renderTimeAllocation(mine, dateLabel){
@@ -1847,7 +1855,7 @@
             <div class="timerow-field">
               <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="-15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 줄이기">－</button>
               <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
-              <span class="timeunit">분</span>
+              <span class="timeunit">분${(!cancelled && minutes >= 60) ? ` (${formatHoursMinutesCompact(minutes)})` : ''}</span>
               <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 늘리기">＋</button>
             </div>
             <div class="timerow-field">
@@ -2600,6 +2608,20 @@
   }
 
   // event delegation: card list is re-rendered via innerHTML, so listeners are bound once on the container
+  stopsList.addEventListener('change', function(e){
+    // 방문지 카드의 검사비 입력 -- ⏱ 시간 배분과 같은 itemTimeState.fees[iKey]를
+    // 직접 쓰기 때문에, 여기서 입력하면 시간 배분 쪽 금액도 즉시 같이 바뀐다.
+    const feeInput = e.target.closest('[data-fee-key]');
+    if(feeInput){
+      if(isDateFinalizedGuard()){ render(); return; }
+      const key = feeInput.getAttribute('data-fee-key');
+      const val = parseInt(feeInput.value, 10);
+      itemTimeState.fees[key] = (!isNaN(val) && val >= 0) ? val : 0;
+      if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
+      render();
+      pushTimeAllocationToGist();
+    }
+  });
   stopsList.addEventListener('click', function(e){
     const naviBtn = e.target.closest('[data-navi-address]');
     if(naviBtn){
@@ -3056,6 +3078,16 @@
       // vice versa: cancelling it in 시간 배분 shows this item as 삭제됨ed here).
       const iKey = itemKey(it, 0);
       const iCancelled = itemTimeState.cancelled.has(iKey);
+      // 검사비 입력만 카드에 얹는다 (시간 수정은 여전히 ⏱ 시간 배분에서) --
+      // 같은 itemKey를 쓰기 때문에 여기서 입력하면 시간 배분 쪽 금액도 즉시
+      // 같이 바뀐다. 취소된 항목/마감된 날짜에서는 시간 배분과 동일하게 비활성화.
+      const fee = itemTimeState.fees[iKey] || 0;
+      const feeRow = `
+          <div class="item-fee-row">
+            <label for="feeitem-${esc(iKey)}">검사비</label>
+            <input type="number" id="feeitem-${esc(iKey)}" class="feeinput" min="0" step="1000" placeholder="검사비" value="${iCancelled ? '' : (fee || '')}" data-fee-key="${esc(iKey)}" ${(iCancelled || currentDateFinalized) ? 'disabled' : ''}>
+            <span class="timeunit">원</span>
+          </div>`;
       return `
         <div class="item${iCancelled ? ' is-cancelled' : ''}">
           <div class="item-top">
@@ -3069,6 +3101,7 @@
           ${intendedLine}
           ${phoneLine}
           ${memoLine}
+          ${feeRow}
         </div>`;
     }).join('');
 
