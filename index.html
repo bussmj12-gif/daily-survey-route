@@ -418,8 +418,18 @@
     margin-top:4px; background:#FFFBEF; border:1px solid #F3E4B8; border-radius:8px;
     padding:8px 10px; font-size:12.5px; line-height:1.55; color:#7A5C10; white-space:pre-line;
   }
-  .item-fee-row{display:flex; align-items:center; gap:8px; margin-top:8px;}
-  .item-fee-row label{font-size:12px; color:var(--ink-soft); font-weight:600;}
+  .item-fee-row{
+    display:flex; align-items:center; gap:10px; margin:8px 0 10px; padding:9px 12px;
+    background:var(--accent-soft); border:1.5px solid #F3C7A2; border-radius:10px;
+  }
+  .item-fee-row label{font-size:14px; color:#B8480A; font-weight:700;}
+  .item-fee-unit{font-size:14px; color:#B8480A; font-weight:700;}
+  .feeinput-big{
+    flex:1; min-width:0; font-family:'Space Mono',monospace; font-weight:700; font-size:17px;
+    text-align:left; border:1.5px solid #F3C7A2; border-radius:8px; padding:8px 10px; color:#B8480A;
+    background:#fff;
+  }
+  .feeinput-big:disabled{background:var(--bg); color:var(--ink-faint); border-color:var(--border);}
   .memo b{font-weight:700;}
 
   .timebox{
@@ -3084,9 +3094,9 @@
       const fee = itemTimeState.fees[iKey] || 0;
       const feeRow = `
           <div class="item-fee-row">
-            <label for="feeitem-${esc(iKey)}">검사비</label>
-            <input type="number" id="feeitem-${esc(iKey)}" class="feeinput" min="0" step="1000" placeholder="검사비" value="${iCancelled ? '' : (fee || '')}" data-fee-key="${esc(iKey)}" ${(iCancelled || currentDateFinalized) ? 'disabled' : ''}>
-            <span class="timeunit">원</span>
+            <label for="feeitem-${esc(iKey)}">💰 검사비</label>
+            <input type="number" id="feeitem-${esc(iKey)}" class="feeinput-big" min="0" step="1000" placeholder="검사비" value="${iCancelled ? '' : (fee || '')}" data-fee-key="${esc(iKey)}" ${(iCancelled || currentDateFinalized) ? 'disabled' : ''}>
+            <span class="item-fee-unit">원</span>
           </div>`;
       return `
         <div class="item${iCancelled ? ' is-cancelled' : ''}">
@@ -3097,11 +3107,11 @@
               <button type="button" class="itemcancelbtn" data-item-cancel-key="${esc(iKey)}" title="시간 배분에서도 함께 반영돼요" ${currentDateFinalized ? 'disabled' : ''}>${iCancelled ? '↺ 복원' : '🗑️ 삭제'}</button>
             </div>
           </div>
+          ${feeRow}
           <span class="item-id">Work Book #${esc(it.id || '—')}</span>
           ${intendedLine}
           ${phoneLine}
           ${memoLine}
-          ${feeRow}
         </div>`;
     }).join('');
 
