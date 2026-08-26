@@ -418,18 +418,21 @@
     margin-top:4px; background:#FFFBEF; border:1px solid #F3E4B8; border-radius:8px;
     padding:8px 10px; font-size:12.5px; line-height:1.55; color:#7A5C10; white-space:pre-line;
   }
-  .item-fee-row{
-    display:flex; align-items:center; gap:10px; margin:8px 0 10px; padding:9px 12px;
-    background:var(--accent-soft); border:1.5px solid #F3C7A2; border-radius:10px;
+  .item-meta-row{display:flex; align-items:center; gap:10px; margin-top:2px;}
+  .item-meta-left{flex:1 1 50%; min-width:0;}
+  .item-fee-compact{
+    flex:1 1 50%; min-width:0; display:flex; align-items:center; gap:6px;
+    background:var(--accent-soft); border:1px solid #F3C7A2; border-radius:8px; padding:4px 8px;
   }
-  .item-fee-row label{font-size:14px; color:#B8480A; font-weight:700;}
-  .item-fee-unit{font-size:14px; color:#B8480A; font-weight:700;}
-  .feeinput-big{
-    flex:1; min-width:0; font-family:'Space Mono',monospace; font-weight:700; font-size:17px;
-    text-align:left; border:1.5px solid #F3C7A2; border-radius:8px; padding:8px 10px; color:#B8480A;
+  .item-fee-compact label{font-size:11px; color:#B8480A; font-weight:700; white-space:nowrap;}
+  .item-fee-inputwrap{display:flex; align-items:center; gap:3px; flex:1; min-width:0;}
+  .item-fee-unit{font-size:11px; color:#B8480A; font-weight:700;}
+  .feeinput-compact{
+    width:100%; min-width:0; font-family:'Space Mono',monospace; font-weight:700; font-size:13px;
+    text-align:left; border:1px solid #F3C7A2; border-radius:6px; padding:3px 6px; color:#B8480A;
     background:#fff;
   }
-  .feeinput-big:disabled{background:var(--bg); color:var(--ink-faint); border-color:var(--border);}
+  .feeinput-compact:disabled{background:var(--bg); color:var(--ink-faint); border-color:var(--border);}
   .memo b{font-weight:700;}
 
   .timebox{
@@ -3092,11 +3095,13 @@
       // 같은 itemKey를 쓰기 때문에 여기서 입력하면 시간 배분 쪽 금액도 즉시
       // 같이 바뀐다. 취소된 항목/마감된 날짜에서는 시간 배분과 동일하게 비활성화.
       const fee = itemTimeState.fees[iKey] || 0;
-      const feeRow = `
-          <div class="item-fee-row">
+      const feeCompact = `
+          <div class="item-fee-compact">
             <label for="feeitem-${esc(iKey)}">💰 검사비</label>
-            <input type="number" id="feeitem-${esc(iKey)}" class="feeinput-big" min="0" step="1000" placeholder="검사비" value="${iCancelled ? '' : (fee || '')}" data-fee-key="${esc(iKey)}" ${(iCancelled || currentDateFinalized) ? 'disabled' : ''}>
-            <span class="item-fee-unit">원</span>
+            <div class="item-fee-inputwrap">
+              <input type="number" id="feeitem-${esc(iKey)}" class="feeinput-compact" min="0" step="1000" placeholder="검사비" value="${iCancelled ? '' : (fee || '')}" data-fee-key="${esc(iKey)}" ${(iCancelled || currentDateFinalized) ? 'disabled' : ''}>
+              <span class="item-fee-unit">원</span>
+            </div>
           </div>`;
       return `
         <div class="item${iCancelled ? ' is-cancelled' : ''}">
@@ -3107,9 +3112,13 @@
               <button type="button" class="itemcancelbtn" data-item-cancel-key="${esc(iKey)}" title="시간 배분에서도 함께 반영돼요" ${currentDateFinalized ? 'disabled' : ''}>${iCancelled ? '↺ 복원' : '🗑️ 삭제'}</button>
             </div>
           </div>
-          ${feeRow}
-          <span class="item-id">Work Book #${esc(it.id || '—')}</span>
-          ${intendedLine}
+          <div class="item-meta-row">
+            <div class="item-meta-left">
+              <span class="item-id">Work Book #${esc(it.id || '—')}</span>
+              ${intendedLine}
+            </div>
+            ${feeCompact}
+          </div>
           ${phoneLine}
           ${memoLine}
         </div>`;
