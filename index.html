@@ -1800,8 +1800,11 @@
   }
   // Compact form for inline display next to an item's 분 input -- no space,
   // matching how the inspector actually writes it (예: 1시간30분, 2시간15분).
+  // Used as the ONLY unit label now (no separate "분" text) so hours and
+  // minutes always show together instead of a bare minute count.
   function formatHoursMinutesCompact(mins){
     const h = Math.floor(mins / 60), m = mins % 60;
+    if(h === 0) return m + '분';
     return h + '시간' + (m > 0 ? m + '분' : '');
   }
   let lastMineForTimeAllocation = [];
@@ -1868,7 +1871,7 @@
             <div class="timerow-field">
               <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="-15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 줄이기">－</button>
               <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
-              <span class="timeunit">분${(!cancelled && minutes >= 60) ? ` (${formatHoursMinutesCompact(minutes)})` : ''}</span>
+              <span class="timeunit">${cancelled ? '분' : formatHoursMinutesCompact(minutes)}</span>
               <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 늘리기">＋</button>
             </div>
             <div class="timerow-field">
