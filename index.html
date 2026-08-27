@@ -465,11 +465,6 @@
     width:56px; flex-shrink:0; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
     border:1.5px solid var(--border); border-radius:8px; padding:6px 2px; color:var(--ink);
   }
-  .timeinput-hm{
-    width:72px; flex-shrink:0; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
-    border:1.5px solid var(--border); border-radius:8px; padding:6px 4px; color:var(--ink);
-  }
-  .timeinput-hm:disabled{background:var(--bg); color:var(--ink-faint);}
   .feeinput{
     width:78px; flex-shrink:0; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
     border:1.5px solid var(--border); border-radius:8px; padding:6px 2px; color:var(--ok);
@@ -911,9 +906,7 @@
     if(input){
       if(isDateFinalizedGuard()){ render(); return; }
       const key = input.getAttribute('data-time-key');
-      // The field now shows/accepts "3시간30분"-style text directly instead
-      // of a separate raw-minutes box -- parse it back into total minutes.
-      const val = parseHourMinuteText(input.value);
+      const val = parseInt(input.value, 10);
       itemTimeState.minutes[key] = (!isNaN(val) && val >= 0) ? val : 0;
       if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
       render();
@@ -924,25 +917,12 @@
     if(feeInput){
       if(isDateFinalizedGuard()){ render(); return; }
       const key = feeInput.getAttribute('data-fee-key');
-      // Input is text (not number) so commas can be typed/shown -- strip
-      // everything but digits before parsing.
-      const val = parseInt(feeInput.value.replace(/[^0-9]/g, ''), 10);
+      const val = parseInt(feeInput.value, 10);
       itemTimeState.fees[key] = (!isNaN(val) && val >= 0) ? val : 0;
       if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
       render();
       pushTimeAllocationToGist();
     }
-  });
-  // Live comma formatting as the inspector types a fee amount (e.g.
-  // "1350000" -> "1,350,000") -- reformats on every keystroke rather than
-  // waiting for blur, since seeing the grouped number as you type is the
-  // whole point. Setting .value programmatically doesn't re-fire 'input',
-  // so this can't loop.
-  timeAllocationList.addEventListener('input', function(e){
-    const el = e.target.closest('.feeinput');
-    if(!el) return;
-    const digits = el.value.replace(/[^0-9]/g, '');
-    el.value = digits ? Number(digits).toLocaleString('ko-KR') : '';
   });
   // 하루 근무시간 is a read-only computed display now (see renderTimeAllocation) --
   // it always mirrors the live sum of active items' 분, and can't be typed
@@ -1820,28 +1800,13 @@
   }
   // Compact form for inline display next to an item's 분 input -- no space,
   // matching how the inspector actually writes it (예: 1시간30분, 2시간15분).
-  // Used as the ONLY unit label now (no separate "분" text) so hours and
-  // minutes always show together instead of a bare minute count.
+  // Used as the ONLY unit label next to an item's 분 input (no separate
+  // "분" text before it) so hours and minutes always show together instead
+  // of a bare minute count.
   function formatHoursMinutesCompact(mins){
     const h = Math.floor(mins / 60), m = mins % 60;
     if(h === 0) return m + '분';
     return h + '시간' + (m > 0 ? m + '분' : '');
-  }
-  // Reverse of the above -- the 시간 배분 time field is now a single text
-  // input showing "3시간30분" directly (no separate raw-minutes box), so
-  // whatever the inspector types there has to be parsed back into a total
-  // minute count. Accepts "3시간30분", "3시간 30분", "45분", "2시간", or a
-  // bare number (treated as minutes, for anyone who'd rather just type that).
-  function parseHourMinuteText(text){
-    if(!text) return 0;
-    const t = text.trim();
-    if(/^\d+$/.test(t)) return parseInt(t, 10);
-    let total = 0;
-    const hMatch = t.match(/(\d+)\s*시간/);
-    const mMatch = t.match(/(\d+)\s*분/);
-    if(hMatch) total += parseInt(hMatch[1], 10) * 60;
-    if(mMatch) total += parseInt(mMatch[1], 10);
-    return total;
   }
   let lastMineForTimeAllocation = [];
   let lastDateLabelForTimeAllocation = '';
@@ -1906,11 +1871,12 @@
           <div class="timerow-actions">
             <div class="timerow-field">
               <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="-15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 줄이기">－</button>
-              <input type="text" inputmode="text" class="timeinput-hm" placeholder="0분" value="${cancelled ? '' : formatHoursMinutesCompact(minutes)}" data-time-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
+              <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
+              <span class="timeunit">${cancelled ? '분' : formatHoursMinutesCompact(minutes)}</span>
               <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 늘리기">＋</button>
             </div>
             <div class="timerow-field">
-              <input type="text" inputmode="numeric" class="feeinput" placeholder="검사비" value="${cancelled ? '' : (fee ? fee.toLocaleString('ko-KR') : '')}" data-fee-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
+              <input type="number" class="feeinput" min="0" step="1000" placeholder="검사비" value="${cancelled ? '' : (fee || '')}" data-fee-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
               <span class="timeunit">원</span>
             </div>
             <button type="button" class="timecancelbtn" data-cancel-key="${esc(key)}" ${currentDateFinalized ? 'disabled' : ''}>${cancelled ? '↺ 복원' : '✕ 취소'}</button>
@@ -2666,21 +2632,12 @@
     if(feeInput){
       if(isDateFinalizedGuard()){ render(); return; }
       const key = feeInput.getAttribute('data-fee-key');
-      // Input is text (not number) so commas can be typed/shown -- strip
-      // everything but digits before parsing.
-      const val = parseInt(feeInput.value.replace(/[^0-9]/g, ''), 10);
+      const val = parseInt(feeInput.value, 10);
       itemTimeState.fees[key] = (!isNaN(val) && val >= 0) ? val : 0;
       if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
       render();
       pushTimeAllocationToGist();
     }
-  });
-  // Live comma formatting as the inspector types (same as the 시간 배분 list).
-  stopsList.addEventListener('input', function(e){
-    const el = e.target.closest('.feeinput-compact');
-    if(!el) return;
-    const digits = el.value.replace(/[^0-9]/g, '');
-    el.value = digits ? Number(digits).toLocaleString('ko-KR') : '';
   });
   stopsList.addEventListener('click', function(e){
     const naviBtn = e.target.closest('[data-navi-address]');
@@ -3146,7 +3103,7 @@
           <div class="item-fee-compact">
             <label for="feeitem-${esc(iKey)}">💰 검사비</label>
             <div class="item-fee-inputwrap">
-              <input type="text" inputmode="numeric" id="feeitem-${esc(iKey)}" class="feeinput-compact" placeholder="검사비" value="${iCancelled ? '' : (fee ? fee.toLocaleString('ko-KR') : '')}" data-fee-key="${esc(iKey)}" ${(iCancelled || currentDateFinalized) ? 'disabled' : ''}>
+              <input type="number" id="feeitem-${esc(iKey)}" class="feeinput-compact" min="0" step="1000" placeholder="검사비" value="${iCancelled ? '' : (fee || '')}" data-fee-key="${esc(iKey)}" ${(iCancelled || currentDateFinalized) ? 'disabled' : ''}>
               <span class="item-fee-unit">원</span>
             </div>
           </div>`;
