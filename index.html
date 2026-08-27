@@ -917,12 +917,25 @@
     if(feeInput){
       if(isDateFinalizedGuard()){ render(); return; }
       const key = feeInput.getAttribute('data-fee-key');
-      const val = parseInt(feeInput.value, 10);
+      // Input is text (not number) so commas can be typed/shown -- strip
+      // everything but digits before parsing.
+      const val = parseInt(feeInput.value.replace(/[^0-9]/g, ''), 10);
       itemTimeState.fees[key] = (!isNaN(val) && val >= 0) ? val : 0;
       if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
       render();
       pushTimeAllocationToGist();
     }
+  });
+  // Live comma formatting as the inspector types a fee amount (e.g.
+  // "1350000" -> "1,350,000") -- reformats on every keystroke rather than
+  // waiting for blur, since seeing the grouped number as you type is the
+  // whole point. Setting .value programmatically doesn't re-fire 'input',
+  // so this can't loop.
+  timeAllocationList.addEventListener('input', function(e){
+    const el = e.target.closest('.feeinput');
+    if(!el) return;
+    const digits = el.value.replace(/[^0-9]/g, '');
+    el.value = digits ? Number(digits).toLocaleString('ko-KR') : '';
   });
   // 하루 근무시간 is a read-only computed display now (see renderTimeAllocation) --
   // it always mirrors the live sum of active items' 분, and can't be typed
@@ -1875,7 +1888,7 @@
               <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 늘리기">＋</button>
             </div>
             <div class="timerow-field">
-              <input type="number" class="feeinput" min="0" step="1000" placeholder="검사비" value="${cancelled ? '' : (fee || '')}" data-fee-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
+              <input type="text" inputmode="numeric" class="feeinput" placeholder="검사비" value="${cancelled ? '' : (fee ? fee.toLocaleString('ko-KR') : '')}" data-fee-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
               <span class="timeunit">원</span>
             </div>
             <button type="button" class="timecancelbtn" data-cancel-key="${esc(key)}" ${currentDateFinalized ? 'disabled' : ''}>${cancelled ? '↺ 복원' : '✕ 취소'}</button>
@@ -2631,12 +2644,21 @@
     if(feeInput){
       if(isDateFinalizedGuard()){ render(); return; }
       const key = feeInput.getAttribute('data-fee-key');
-      const val = parseInt(feeInput.value, 10);
+      // Input is text (not number) so commas can be typed/shown -- strip
+      // everything but digits before parsing.
+      const val = parseInt(feeInput.value.replace(/[^0-9]/g, ''), 10);
       itemTimeState.fees[key] = (!isNaN(val) && val >= 0) ? val : 0;
       if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
       render();
       pushTimeAllocationToGist();
     }
+  });
+  // Live comma formatting as the inspector types (same as the 시간 배분 list).
+  stopsList.addEventListener('input', function(e){
+    const el = e.target.closest('.feeinput-compact');
+    if(!el) return;
+    const digits = el.value.replace(/[^0-9]/g, '');
+    el.value = digits ? Number(digits).toLocaleString('ko-KR') : '';
   });
   stopsList.addEventListener('click', function(e){
     const naviBtn = e.target.closest('[data-navi-address]');
@@ -3102,7 +3124,7 @@
           <div class="item-fee-compact">
             <label for="feeitem-${esc(iKey)}">💰 검사비</label>
             <div class="item-fee-inputwrap">
-              <input type="number" id="feeitem-${esc(iKey)}" class="feeinput-compact" min="0" step="1000" placeholder="검사비" value="${iCancelled ? '' : (fee || '')}" data-fee-key="${esc(iKey)}" ${(iCancelled || currentDateFinalized) ? 'disabled' : ''}>
+              <input type="text" inputmode="numeric" id="feeitem-${esc(iKey)}" class="feeinput-compact" placeholder="검사비" value="${iCancelled ? '' : (fee ? fee.toLocaleString('ko-KR') : '')}" data-fee-key="${esc(iKey)}" ${(iCancelled || currentDateFinalized) ? 'disabled' : ''}>
               <span class="item-fee-unit">원</span>
             </div>
           </div>`;
