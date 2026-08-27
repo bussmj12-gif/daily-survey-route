@@ -465,6 +465,11 @@
     width:56px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
     border:1.5px solid var(--border); border-radius:8px; padding:6px 2px; color:var(--ink);
   }
+  .timeinput-hm{
+    width:72px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
+    border:1.5px solid var(--border); border-radius:8px; padding:6px 4px; color:var(--ink);
+  }
+  .timeinput-hm:disabled{background:var(--bg); color:var(--ink-faint);}
   .feeinput{
     width:78px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
     border:1.5px solid var(--border); border-radius:8px; padding:6px 2px; color:var(--ok);
@@ -906,7 +911,9 @@
     if(input){
       if(isDateFinalizedGuard()){ render(); return; }
       const key = input.getAttribute('data-time-key');
-      const val = parseInt(input.value, 10);
+      // The field now shows/accepts "3시간30분"-style text directly instead
+      // of a separate raw-minutes box -- parse it back into total minutes.
+      const val = parseHourMinuteText(input.value);
       itemTimeState.minutes[key] = (!isNaN(val) && val >= 0) ? val : 0;
       if(itemTimeDateKey) saveItemTimeState(itemTimeDateKey, itemTimeState);
       render();
@@ -1820,6 +1827,22 @@
     if(h === 0) return m + '분';
     return h + '시간' + (m > 0 ? m + '분' : '');
   }
+  // Reverse of the above -- the 시간 배분 time field is now a single text
+  // input showing "3시간30분" directly (no separate raw-minutes box), so
+  // whatever the inspector types there has to be parsed back into a total
+  // minute count. Accepts "3시간30분", "3시간 30분", "45분", "2시간", or a
+  // bare number (treated as minutes, for anyone who'd rather just type that).
+  function parseHourMinuteText(text){
+    if(!text) return 0;
+    const t = text.trim();
+    if(/^\d+$/.test(t)) return parseInt(t, 10);
+    let total = 0;
+    const hMatch = t.match(/(\d+)\s*시간/);
+    const mMatch = t.match(/(\d+)\s*분/);
+    if(hMatch) total += parseInt(hMatch[1], 10) * 60;
+    if(mMatch) total += parseInt(mMatch[1], 10);
+    return total;
+  }
   let lastMineForTimeAllocation = [];
   let lastDateLabelForTimeAllocation = '';
   function renderTimeAllocation(mine, dateLabel){
@@ -1883,8 +1906,7 @@
           <div class="timerow-actions">
             <div class="timerow-field">
               <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="-15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 줄이기">－</button>
-              <input type="number" class="timeinput" min="0" step="15" value="${cancelled ? '' : minutes}" data-time-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
-              <span class="timeunit">${cancelled ? '분' : formatHoursMinutesCompact(minutes)}</span>
+              <input type="text" inputmode="text" class="timeinput-hm" placeholder="0분" value="${cancelled ? '' : formatHoursMinutesCompact(minutes)}" data-time-key="${esc(key)}" ${rowDisabled ? 'disabled' : ''}>
               <button type="button" class="stepbtn" data-time-step-key="${esc(key)}" data-time-step-delta="15" ${rowDisabled ? 'disabled' : ''} aria-label="15분 늘리기">＋</button>
             </div>
             <div class="timerow-field">
