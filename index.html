@@ -419,16 +419,16 @@
     padding:8px 10px; font-size:12.5px; line-height:1.55; color:#7A5C10; white-space:pre-line;
   }
   .item-meta-row{display:flex; align-items:stretch; gap:10px; margin-top:2px; flex-wrap:wrap;}
-  .item-meta-left{flex:1 1 140px; min-width:0;}
+  .item-meta-left{flex:1 1 140px; min-width:140px;}
   .item-fee-compact{
-    flex:1 1 140px; min-width:0; display:flex; flex-direction:column; gap:3px;
+    flex:1 1 150px; min-width:150px; display:flex; flex-direction:column; gap:3px;
     background:var(--accent-soft); border:1px solid #F3C7A2; border-radius:8px; padding:6px 8px;
   }
   .item-fee-compact label{font-size:10.5px; color:#B8480A; font-weight:700; white-space:nowrap;}
   .item-fee-inputwrap{display:flex; align-items:center; gap:4px; width:100%;}
   .item-fee-unit{font-size:11px; color:#B8480A; font-weight:700; flex:0 0 auto;}
   .feeinput-compact{
-    flex:1 1 auto; width:0; min-width:0; font-family:'Space Mono',monospace; font-weight:700; font-size:13px;
+    flex:1 1 auto; min-width:90px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px;
     text-align:left; border:1px solid #F3C7A2; border-radius:6px; padding:4px 6px; color:#B8480A;
     background:#fff;
   }
@@ -460,18 +460,18 @@
   .timerow-project{font-weight:800; color:var(--ink); font-family:'Space Mono',monospace;}
   .timerow-project.is-new{color:#B8480A;}
   .timerow-actions{display:flex; align-items:center; gap:6px; flex:0 0 auto; flex-wrap:wrap;}
-  .timerow-field{display:flex; align-items:center; gap:4px;}
+  .timerow-field{display:flex; align-items:center; gap:4px; flex:0 0 auto;}
   .timeinput{
-    width:56px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
+    width:56px; flex-shrink:0; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
     border:1.5px solid var(--border); border-radius:8px; padding:6px 2px; color:var(--ink);
   }
   .timeinput-hm{
-    width:72px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
+    width:72px; flex-shrink:0; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
     border:1.5px solid var(--border); border-radius:8px; padding:6px 4px; color:var(--ink);
   }
   .timeinput-hm:disabled{background:var(--bg); color:var(--ink-faint);}
   .feeinput{
-    width:78px; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
+    width:78px; flex-shrink:0; font-family:'Space Mono',monospace; font-weight:700; font-size:13px; text-align:center;
     border:1.5px solid var(--border); border-radius:8px; padding:6px 2px; color:var(--ok);
   }
   .timeinput:disabled, .feeinput:disabled{background:var(--bg); color:var(--ink-faint);}
