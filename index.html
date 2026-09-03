@@ -1644,28 +1644,62 @@
   // for a date that's already archived simply overwrites that one entry --
   // there's no separate "old version" to clean up, only ever one file per
   // date. Kept for WORKBOOK_ARCHIVE_RETENTION_DAYS so storage doesn't grow
-  // forever; loadWorkbookFromArchive()/선택해서 불러오기 only ever needs the
-  // last week or two anyway.
-  const WORKBOOK_ARCHIVE_RETENTION_DAYS = 21;
+  // forever; loadWorkbookFromArchive()/선택해서 불러오기 only needs a
+  // recent handful of days anyway.
+  const WORKBOOK_ARCHIVE_RETENTION_DAYS = 5;
   function loadWorkbookArchive(){
     try{
       const v = JSON.parse(localStorage.getItem(LS_WORKBOOK_ARCHIVE) || '{}');
       return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
     }catch(e){ return {}; }
   }
+  // When a date drops out of the workbook archive, its 완료 처리/시간
+  // 배분/출발·도착지/마감 상태 are pruned right along with it -- otherwise
+  // those four stores would just keep growing forever even though the
+  // workbook they belong to is already gone, with no way to see or load
+  // them back anyway.
+  function pruneRelatedDateStores(dateKey){
+    [LS_COMPLETED, LS_ITEM_TIME, LS_ROUTE_ENDPOINTS, LS_FINALIZED].forEach(lsKey => {
+      try{
+        const all = JSON.parse(localStorage.getItem(lsKey) || '{}');
+        if(all && typeof all === 'object' && Object.prototype.hasOwnProperty.call(all, dateKey)){
+          delete all[dateKey];
+          localStorage.setItem(lsKey, JSON.stringify(all));
+        }
+      }catch(e){}
+    });
+  }
   function pruneWorkbookArchive(all){
     const cutoff = Date.now() - WORKBOOK_ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    let deletedAny = false;
     Object.keys(all).forEach(k => {
       const t = all[k] && all[k].uploadedAt ? Date.parse(all[k].uploadedAt) : NaN;
-      if(!isNaN(t) && t < cutoff) delete all[k];
+      if(!isNaN(t) && t < cutoff){
+        delete all[k];
+        pruneRelatedDateStores(k);
+        deletedAny = true;
+      }
     });
+    all.__deletedAny = deletedAny; // read-and-stripped by saveWorkbookToArchive below
     return all;
   }
   function saveWorkbookToArchive(dateKey, rows, dateLabel, fileLabel){
     try{
-      const all = pruneWorkbookArchive(loadWorkbookArchive());
-      all[dateKey] = { rows, dateLabel: dateLabel || '', fileLabel: fileLabel || '', uploadedAt: new Date().toISOString() };
-      localStorage.setItem(LS_WORKBOOK_ARCHIVE, JSON.stringify(all));
+      const pruned = pruneWorkbookArchive(loadWorkbookArchive());
+      const deletedAny = !!pruned.__deletedAny;
+      delete pruned.__deletedAny;
+      pruned[dateKey] = { rows, dateLabel: dateLabel || '', fileLabel: fileLabel || '', uploadedAt: new Date().toISOString() };
+      localStorage.setItem(LS_WORKBOOK_ARCHIVE, JSON.stringify(pruned));
+      // A prune actually removing something means old data needs to be
+      // completely gone, not just gone on this one device -- push those
+      // now-trimmed stores so the cloud (and other devices) drop it too.
+      // Ordinary saves where nothing aged out don't trigger any of this.
+      if(deletedAny){
+        pushCompletedToGist();
+        pushTimeAllocationToGist();
+        pushRouteEndpointsToGist();
+        pushFinalizedToGist();
+      }
     }catch(e){ /* archiving is best-effort -- the live workbook load itself must not fail because of this */ }
   }
   function loadWorkbookFromArchive(dateKey){
