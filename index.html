@@ -408,6 +408,7 @@
   .item.is-cancelled .itemcancelbtn{background:var(--ok); border-color:var(--ok); color:#fff; opacity:1;}
   .item-asset.strike{text-decoration:line-through;}
   .donenote{margin:0; padding:10px 16px; font-size:12px; color:var(--ink-faint); font-style:italic;}
+  .add-group-item-row{padding:10px 16px 14px; border-top:1px dashed var(--border);}
   .item-intended{font-size:12.5px; color:var(--ink-soft); white-space:pre-line;}
   .item-phone-row{display:flex; align-items:center; gap:8px; margin-top:2px;}
   .item-phone-row a{
@@ -1011,6 +1012,7 @@
   const ADDR_OVERRIDES_FILENAME = 'address-overrides.json';
   const PROJECT_OVERRIDES_FILENAME = 'project-overrides.json';
   const MANUAL_TIME_PROJECTS_FILENAME = 'manual-time-projects.json';
+  const MANUAL_GROUP_ITEMS_FILENAME = 'manual-group-items.json';
   const TIME_ALLOCATION_FILENAME = 'time-allocation.json';
   const COMPLETED_FILENAME = 'completed-stops.json';
   const ROUTE_ENDPOINTS_FILENAME = 'route-endpoints.json';
@@ -1027,6 +1029,7 @@
   const LS_ITEM_TIME = 'daily-route-item-time';
   const LS_PROJECT_OVERRIDES = 'daily-route-project-overrides';
   const LS_MANUAL_TIME_PROJECTS = 'daily-route-manual-time-projects';
+  const LS_MANUAL_GROUP_ITEMS = 'daily-route-manual-group-items';
   const LS_FINALIZED = 'daily-route-finalized-dates';
   const LS_WORKBOOK_ARCHIVE = 'daily-route-workbook-archive';
 
@@ -1210,6 +1213,29 @@
     const data = await pullGistFile(token, gistId, MANUAL_TIME_PROJECTS_FILENAME);
     if(data && typeof data === 'object' && !Array.isArray(data)){
       saveAllManualTimeProjects(data);
+    }
+  }
+
+  // ---------- syncing "➕ 항목 추가" (기존 방문지에 끼워넣은 항목) across an inspector's own devices ----------
+  async function pushManualGroupItemsToGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    try{
+      await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json', 'Authorization':'token '+token},
+        body: JSON.stringify({
+          files: { [MANUAL_GROUP_ITEMS_FILENAME]: { content: JSON.stringify(loadAllManualGroupItems()) } }
+        })
+      });
+    }catch(e){ /* best-effort -- the entry is still saved locally either way */ }
+  }
+  async function pullManualGroupItemsFromGist(){
+    const {token, gistId} = getDeviceConfig();
+    if(!token || !gistId) return;
+    const data = await pullGistFile(token, gistId, MANUAL_GROUP_ITEMS_FILENAME);
+    if(data && typeof data === 'object' && !Array.isArray(data)){
+      saveAllManualGroupItems(data);
     }
   }
 
@@ -1498,6 +1524,7 @@
     await pullAddressOverridesFromGist();
     await pullProjectOverridesFromGist();
     await pullManualTimeProjectsFromGist();
+    await pullManualGroupItemsFromGist();
     await pullTimeAllocationFromGist();
     await pullCompletedFromGist();
     await pullRouteEndpointsFromGist();
@@ -2075,13 +2102,14 @@
     await pushAddressOverridesToGist();
     await pushProjectOverridesToGist();
     await pushManualTimeProjectsToGist();
+    await pushManualGroupItemsToGist();
     await pushTimeAllocationToGist();
     await pushCompletedToGist();
     await pushRouteEndpointsToGist();
     await pushFinalizedToGist();
     await pushWorkbookArchiveToGist();
     resyncStopsBtn.textContent = origLabel;
-    showToast('이 기기의 방문지·주소·Project Number·직접 추가한 프로젝트·시간 배분·완료 처리·출발/도착지·마감 상태·엑셀 보관함을 클라우드에 다시 올렸어요');
+    showToast('이 기기의 방문지·주소·Project Number·직접 추가한 프로젝트·항목 추가·시간 배분·완료 처리·출발/도착지·마감 상태·엑셀 보관함을 클라우드에 다시 올렸어요');
   });
   cancelAddStopBtn.addEventListener('click', function(){
     addStopForm.style.display = 'none';
@@ -2674,6 +2702,27 @@
     }
   });
   stopsList.addEventListener('click', function(e){
+    const addGroupItemBtn = e.target.closest('[data-add-group-item-key]');
+    if(addGroupItemBtn){
+      e.preventDefault();
+      if(isDateFinalizedGuard()) return;
+      const customer = addGroupItemBtn.getAttribute('data-add-group-item-customer');
+      const address = addGroupItemBtn.getAttribute('data-add-group-item-address');
+      const location = addGroupItemBtn.getAttribute('data-add-group-item-location');
+      const asset = window.prompt('이 방문지에 추가할 품목/업무 내용을 입력하세요\n(예: Air receivers, Hydro test 등)', '');
+      if(asset === null || !asset.trim()) return;
+      const code = codeInput.value.trim().toUpperCase();
+      if(!code){ showToast('먼저 검사관코드를 입력해 주세요'); return; }
+      const items = loadManualGroupItems(code);
+      items.push({
+        id: 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        customer, address, location, asset: asset.trim(), project: ''
+      });
+      saveManualGroupItems(code, items);
+      render();
+      pushManualGroupItemsToGist();
+      return;
+    }
     const naviBtn = e.target.closest('[data-navi-address]');
     if(naviBtn){
       e.preventDefault();
@@ -2931,6 +2980,14 @@
       .replace(/특별시/g, '시')
       .replace(/특별자치도/g, '도');
   }
+  // Shared by groupItems() (deciding whether two rows are "the same place")
+  // and by the ➕ 항목 추가 button (finding which group to attach a new
+  // manually-added item to) -- keeping this in one place means both always
+  // agree on what counts as a match.
+  function computeGroupMatchKey(customer, addressOrLocation){
+    const norm = s => normCityForm(s || '').toUpperCase().replace(/\s+/g, '');
+    return norm(customer) + '||' + norm(addressOrLocation);
+  }
 
   function groupItems(items){
     const groups = [];
@@ -2941,8 +2998,7 @@
       // rows are "the same place" -- "낙동남로 533번길" vs "낙동남로533번길"
       // is the same address typed with/without a space, and shouldn't split
       // into two separate cards for the same company.
-      const normForKey = s => normCityForm(s || '').toUpperCase().replace(/\s+/g, '');
-      const key = normForKey(it.customer) + '||' + normForKey(it.address || it.location);
+      const key = computeGroupMatchKey(it.customer, it.address || it.location);
       if(!map.has(key)){
         const g = {customer: it.customer || '(업체명 미기재)', location: it.location, address: it.address, remote, items: []};
         map.set(key, g);
@@ -3015,6 +3071,38 @@
       isManualTimeProject: true, manualTimeProjectId: mp.id
     };
   }
+  // ➕ 항목 추가: a new work item added to an EXISTING stop/company (not a
+  // new address, not a standalone project). Stored per 검사관코드 with the
+  // customer/address it was created against, so it can be turned back into
+  // an item and fed into groupItems() alongside the workbook rows -- it
+  // naturally merges into that same card (matching customer+address), or
+  // stands alone as its own card if the workbook stops listing that company.
+  function loadAllManualGroupItems(){
+    try{
+      const parsed = JSON.parse(localStorage.getItem(LS_MANUAL_GROUP_ITEMS) || '{}');
+      if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      return parsed;
+    }catch(e){ return {}; }
+  }
+  function saveAllManualGroupItems(byCode){
+    try{ localStorage.setItem(LS_MANUAL_GROUP_ITEMS, JSON.stringify(byCode)); }catch(e){}
+  }
+  function loadManualGroupItems(code){
+    const all = loadAllManualGroupItems();
+    return Array.isArray(all[code]) ? all[code] : [];
+  }
+  function saveManualGroupItems(code, arr){
+    const all = loadAllManualGroupItems();
+    all[code] = arr;
+    saveAllManualGroupItems(all);
+  }
+  function manualGroupItemToItem(mgi){
+    return {
+      id: 'mgi:' + mgi.id, project: mgi.project || '', customer: mgi.customer, asset: mgi.asset,
+      location: mgi.location || '', address: mgi.address || '', phone: '', intended: '', details: mgi.note || '',
+      isManualGroupItem: true, manualGroupItemId: mgi.id
+    };
+  }
   // Converts a manual stop (방문지 추가) into the same item shape so it
   // automatically shows up in "⏱ 시간 배분" too, without a separate add step.
   function manualStopToTimeItem(ms, code){
@@ -3042,7 +3130,11 @@
   // {onsite, remote} result, so both render() and the route optimizer stay
   // in sync without duplicating this merge logic.
   function buildOnsiteAndRemoteGroups(mine, code){
-    const groups = groupItems(mine);
+    // 항목 추가로 만든 아이템은 workbook 행과 똑같은 모양이라 groupItems()가
+    // 자연스럽게 같은 customer+address 카드로 합쳐준다 (없으면 자기 혼자
+    // 새 카드가 된다) -- 방문지 추가(manualStops)처럼 별도 병합 로직이 필요 없다.
+    const manualItems = code ? loadManualGroupItems(code).map(manualGroupItemToItem) : [];
+    const groups = groupItems(mine.concat(manualItems));
     const manualGroups = loadManualStops(code).map(ms => manualStopToGroup(ms, code));
     return {
       onsite: groups.filter(g => !g.remote).concat(manualGroups),
@@ -3168,7 +3260,15 @@
     const nothingEditedNote = (isDone && !addressLine && itemsForRender.length === 0)
       ? '<p class="donenote">수정된 내용 없음</p>' : '';
     const itemsBlock = itemsForRender.length > 0 ? `<div class="items">${itemsHtml}</div>` : '';
-    return `<div class="stop${remoteClass}${ownerClass}${doneClass}">${head}${addressLine}${actionRow}${nothingEditedNote}${itemsBlock}</div>`;
+    // ➕ 항목 추가: lets the inspector attach one more work item to THIS same
+    // company/address (e.g. a second Project Number found on site) without
+    // needing a whole new 방문지. Hidden once the card is 완료/마감 처리된
+    // 상태라 -- add the item after un-완료ing (or before 마감) instead.
+    const addItemRow = (!isDone && !currentDateFinalized) ? `
+      <div class="add-group-item-row">
+        <button type="button" class="smallbtn" data-add-group-item-key="${esc(computeGroupMatchKey(g.customer, g.address || g.location))}" data-add-group-item-customer="${esc(g.customer)}" data-add-group-item-address="${esc(g.address || '')}" data-add-group-item-location="${esc(g.location || '')}">➕ 항목 추가</button>
+      </div>` : '';
+    return `<div class="stop${remoteClass}${ownerClass}${doneClass}">${head}${addressLine}${actionRow}${nothingEditedNote}${itemsBlock}${addItemRow}</div>`;
   }
 
   function render(){
@@ -3323,11 +3423,13 @@
     showAddStopBtn.disabled = currentDateFinalized;
 
     // "⏱ 시간 배분" covers everything for the day -- workbook 배정 건은 물론,
-    // 방문지 추가로 만든 동선(자동 반영)과 동선 없이 단독으로 추가한 프로젝트
-    // (운항선, 보유 Type/Works Approval 등)까지 모두 합쳐서 보여준다.
+    // 방문지 추가로 만든 동선(자동 반영), 동선 없이 단독으로 추가한 프로젝트
+    // (운항선, 보유 Type/Works Approval 등), 그리고 기존 방문지에 ➕ 항목
+    // 추가로 끼워넣은 항목까지 모두 합쳐서 보여준다.
     const timeAllocationItems = mine
       .concat(code ? loadManualStops(code).map(ms => manualStopToTimeItem(ms, code)) : [])
-      .concat(code ? loadManualTimeProjects(code).map(mp => manualTimeProjectToItem(mp, code)) : []);
+      .concat(code ? loadManualTimeProjects(code).map(mp => manualTimeProjectToItem(mp, code)) : [])
+      .concat(code ? loadManualGroupItems(code).map(manualGroupItemToItem) : []);
     renderTimeAllocation(timeAllocationItems, (parsed.dateText || '') + (parsed.dayText ? ' (' + parsed.dayText + ')' : ''));
   }
 
@@ -3479,6 +3581,7 @@
       await pullAddressOverridesFromGist();
       await pullProjectOverridesFromGist();
       await pullManualTimeProjectsFromGist();
+      await pullManualGroupItemsFromGist();
       await pullTimeAllocationFromGist();
       await pullCompletedFromGist();
       await pullRouteEndpointsFromGist();
