@@ -2716,7 +2716,7 @@
       const items = loadManualGroupItems(code);
       items.push({
         id: 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        customer, address, location, asset: asset.trim(), project: ''
+        customer, address, location, asset: asset.trim(), project: 'New'
       });
       saveManualGroupItems(code, items);
       render();
@@ -3098,7 +3098,7 @@
   }
   function manualGroupItemToItem(mgi){
     return {
-      id: 'mgi:' + mgi.id, project: mgi.project || '', customer: mgi.customer, asset: mgi.asset,
+      id: 'mgi:' + mgi.id, project: mgi.project || 'New', customer: mgi.customer, asset: mgi.asset,
       location: mgi.location || '', address: mgi.address || '', phone: '', intended: '', details: mgi.note || '',
       isManualGroupItem: true, manualGroupItemId: mgi.id
     };
@@ -3244,7 +3244,7 @@
           </div>
           <div class="item-meta-row">
             <div class="item-meta-left">
-              <span class="item-id">Work Book #${esc(it.id || '—')}</span>
+              <span class="item-id">${it.isManualGroupItem ? '🔧 직접 추가한 항목' : 'Work Book #' + esc(it.id || '—')}</span>
               ${intendedLine}
             </div>
             ${feeCompact}
