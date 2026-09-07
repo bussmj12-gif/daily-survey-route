@@ -2514,20 +2514,55 @@
     // so calling it twice in sequence (owner-first mode) naturally continues
     // the route from wherever the previous chain left off.
     let current = startCoord;
-    function nearestChain(list){
+    function tourLength(coordList, start, end){
+      let total = 0, cur = start;
+      coordList.forEach(c => { total += haversineKm(cur, c); cur = c; });
+      if(end) total += haversineKm(cur, end); // count the final leg home/to the endpoint too
+      return total;
+    }
+    function nearestChain(list, finalEndCoord){
       const remaining = list.slice();
-      const chain = [];
+      let chain = [];
+      let cursor = current;
       while(remaining.length){
         let bestIdx = 0, bestDist = Infinity;
         remaining.forEach((r,i)=>{
-          const d = haversineKm(current, r.coord);
+          const d = haversineKm(cursor, r.coord);
           if(d < bestDist){ bestDist = d; bestIdx = i; }
         });
         const chosen = remaining.splice(bestIdx,1)[0];
-        chain.push(chosen.group);
-        current = chosen.coord;
+        chain.push(chosen);
+        cursor = chosen.coord;
       }
-      return chain;
+      // Nearest-neighbor greedily grabs the closest NEXT stop at every step,
+      // which can strand a whole cluster of nearby stops for later and force
+      // a long detour back to reach them (예: 집→사상→김해→사상→회사처럼
+      // 왔던 방향으로 되돌아가는 동선). 2-opt fixes this: repeatedly try
+      // reversing a middle segment of the route, and keep the reversal only
+      // if it shortens the total distance. finalEndCoord (only passed for
+      // whichever chain is actually the last leg of the day) makes sure the
+      // trip back to 도착지/집 is weighed too -- otherwise the optimizer has
+      // no idea it needs to end up anywhere in particular and can leave the
+      // route pointed the wrong way for that last leg.
+      if(chain.length >= 4){
+        let improved = true;
+        while(improved){
+          improved = false;
+          for(let i = 0; i < chain.length - 1; i++){
+            for(let j = i + 1; j < chain.length; j++){
+              const candidate = chain.slice(0, i)
+                .concat(chain.slice(i, j + 1).reverse())
+                .concat(chain.slice(j + 1));
+              if(tourLength(candidate.map(c => c.coord), current, finalEndCoord) < tourLength(chain.map(c => c.coord), current, finalEndCoord) - 1e-9){
+                chain = candidate;
+                improved = true;
+              }
+            }
+          }
+        }
+      }
+      if(chain.length) current = chain[chain.length - 1].coord;
+      return chain.map(c => c.group);
     }
 
     let ordered;
@@ -2535,7 +2570,7 @@
     if(orderMode === 'ownerFirst'){
       const ownerUsable = usable.filter(c => c.group.items.some(it => mentionsOwner(it.details)));
       const restUsable = usable.filter(c => !c.group.items.some(it => mentionsOwner(it.details)));
-      ordered = nearestChain(ownerUsable).concat(nearestChain(restUsable));
+      ordered = nearestChain(ownerUsable).concat(nearestChain(restUsable, endCoord));
     }else if(orderMode === 'manual'){
       excludeKeysFromFailed = manualChosenKeySet;
       const restUsable = usable.filter(c => !manualChosenKeySet.has(groupKey(c.group)));
@@ -2546,9 +2581,9 @@
         const entry = usable.find(c => groupKey(c.group) === k);
         if(entry) current = entry.coord;
       });
-      ordered = manualChosenGroups.concat(nearestChain(restUsable));
+      ordered = manualChosenGroups.concat(nearestChain(restUsable, endCoord));
     }else{
-      ordered = nearestChain(usable);
+      ordered = nearestChain(usable, endCoord);
     }
     // Avoid double-listing the manually chosen stop if its own geocoding had failed
     failed.filter(f => !excludeKeysFromFailed.has(groupKey(f.group))).forEach(f => ordered.push(f.group));
