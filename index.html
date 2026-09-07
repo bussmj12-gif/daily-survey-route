@@ -2797,6 +2797,17 @@
       pushTimeAllocationToGist();
       return;
     }
+    const deleteGroupItemBtn = e.target.closest('[data-delete-manual-group-item-key]');
+    if(deleteGroupItemBtn){
+      e.preventDefault();
+      if(isDateFinalizedGuard()) return;
+      const id = deleteGroupItemBtn.getAttribute('data-delete-manual-group-item-key');
+      const code = codeInput.value.trim().toUpperCase();
+      saveManualGroupItems(code, loadManualGroupItems(code).filter(mgi => mgi.id !== id));
+      render();
+      pushManualGroupItemsToGist();
+      return;
+    }
     const deleteManualBtn = e.target.closest('[data-delete-manual-key]');
     if(deleteManualBtn){
       e.preventDefault();
@@ -3239,7 +3250,9 @@
             <span class="item-asset${iCancelled ? ' strike' : ''}">${esc(it.asset || '(품목 미기재)')}</span>
             <div class="item-top-actions">
               <button type="button" class="item-project${isNewProject ? ' is-new' : ''}" data-project-edit-key="${esc(pKey)}" data-project-edit-workbook="${esc(it.id || '')}" title="Project Number 수정" ${currentDateFinalized ? 'disabled' : ''}>${esc(projectVal)}</button>
-              <button type="button" class="itemcancelbtn" data-item-cancel-key="${esc(iKey)}" title="시간 배분에서도 함께 반영돼요" ${currentDateFinalized ? 'disabled' : ''}>${iCancelled ? '↺ 복원' : '🗑️ 삭제'}</button>
+              ${it.isManualGroupItem
+                ? `<button type="button" class="itemcancelbtn" data-delete-manual-group-item-key="${esc(it.manualGroupItemId)}" title="완전히 삭제 (매일 다시 나타나지 않아요)" style="color:var(--danger); border-color:#F1C4B8;" ${currentDateFinalized ? 'disabled' : ''}>🗑️ 삭제</button>`
+                : `<button type="button" class="itemcancelbtn" data-item-cancel-key="${esc(iKey)}" title="시간 배분에서도 함께 반영돼요" ${currentDateFinalized ? 'disabled' : ''}>${iCancelled ? '↺ 복원' : '🗑️ 삭제'}</button>`}
             </div>
           </div>
           <div class="item-meta-row">
