@@ -1031,6 +1031,7 @@
   const LS_MANUAL_TIME_PROJECTS = 'daily-route-manual-time-projects';
   const LS_MANUAL_GROUP_ITEMS = 'daily-route-manual-group-items';
   const LS_FINALIZED = 'daily-route-finalized-dates';
+  const LS_ORDER_MODE = 'daily-route-order-mode';
   const LS_WORKBOOK_ARCHIVE = 'daily-route-workbook-archive';
 
   let lastWorkbookRows = null;
@@ -1043,6 +1044,7 @@
   let autoRouteHandledForDateKey = null; // guards against re-triggering the popup/auto-optimize every render() call within one page session
   let itemTimeState = { cancelled: new Set(), minutes: {}, fees: {}, hours: null };
   let itemTimeDateKey = null;
+  let orderModeDateKey = null;
   // Whether the day currently on screen has been 🔒 마감(최종 저장) --
   // recomputed every render() from LS_FINALIZED, and read by every mutating
   // handler below to refuse further edits until 마감 해제.
@@ -1788,6 +1790,39 @@
     }catch(e){}
   }
 
+  // ---------- remembered 동선 정렬 방식 per day ----------
+  // Keyed by the same dateKey as everything else above, so each inspector's
+  // chosen sort mode (and, for "검사관 지정 우선권", their 1~3순위 지정) survives
+  // leaving the page and coming back -- it no longer silently reverts to the
+  // ⭐ 선주입회 default on every reload.
+  function loadOrderModeForDate(dateKey){
+    try{
+      const all = JSON.parse(localStorage.getItem(LS_ORDER_MODE) || '{}');
+      const stored = all && typeof all === 'object' ? all[dateKey] : null;
+      if(stored) return stored;
+    }catch(e){}
+    return null;
+  }
+  function saveOrderModeForDate(dateKey, value){
+    try{
+      const all = JSON.parse(localStorage.getItem(LS_ORDER_MODE) || '{}');
+      all[dateKey] = value;
+      localStorage.setItem(LS_ORDER_MODE, JSON.stringify(all));
+    }catch(e){}
+  }
+  function currentOrderModeSnapshot(){
+    const orderModeEl = document.querySelector('input[name="orderMode"]:checked');
+    return {
+      mode: orderModeEl ? orderModeEl.value : 'ownerFirst',
+      p1: manualPriorityInput1.value || '',
+      p2: manualPriorityInput2.value || '',
+      p3: manualPriorityInput3.value || ''
+    };
+  }
+  function saveOrderModeIfReady(){
+    if(orderModeDateKey) saveOrderModeForDate(orderModeDateKey, currentOrderModeSnapshot());
+  }
+
   // ---------- 시간 배분 ----------
   // Each active item stores its own explicit minutes value (not recomputed
   // from a fixed target every render). "하루 근무시간" is used once to seed
@@ -2399,6 +2434,7 @@
   document.querySelectorAll('input[name="orderMode"]').forEach(function(radio){
     radio.addEventListener('change', function(){
       manualPriorityRow.style.display = (radio.value === 'manual' && radio.checked) ? 'flex' : 'none';
+      saveOrderModeIfReady();
     });
   });
 
@@ -2409,12 +2445,17 @@
       manualPrioField3.style.display = 'none';
       manualPriorityInput3.value = '';
     }
+    saveOrderModeIfReady();
   });
   manualPriorityInput2.addEventListener('input', function(){
     manualPrioField3.style.display = manualPriorityInput2.value.trim() ? '' : 'none';
     if(!manualPriorityInput2.value.trim()){
       manualPriorityInput3.value = '';
     }
+    saveOrderModeIfReady();
+  });
+  manualPriorityInput3.addEventListener('input', function(){
+    saveOrderModeIfReady();
   });
 
   manualPrioClear1.addEventListener('click', function(){
@@ -2427,6 +2468,7 @@
   });
   manualPrioClear3.addEventListener('click', function(){
     manualPriorityInput3.value = '';
+    saveOrderModeIfReady();
   });
 
   async function performOptimization(startPlaceId, endPlaceId){
@@ -3357,6 +3399,22 @@
     if(dateKey !== itemTimeDateKey){
       itemTimeState = loadItemTimeState(dateKey);
       itemTimeDateKey = dateKey;
+    }
+    if(dateKey !== orderModeDateKey){
+      const savedOrderMode = loadOrderModeForDate(dateKey);
+      if(savedOrderMode){
+        const radioToCheck = document.querySelector('input[name="orderMode"][value="' + savedOrderMode.mode + '"]');
+        if(radioToCheck){
+          radioToCheck.checked = true;
+          manualPriorityRow.style.display = (savedOrderMode.mode === 'manual') ? 'flex' : 'none';
+        }
+        manualPriorityInput1.value = savedOrderMode.p1 || '';
+        manualPriorityInput2.value = savedOrderMode.p2 || '';
+        manualPrioField2.style.display = manualPriorityInput1.value.trim() ? '' : 'none';
+        manualPriorityInput3.value = savedOrderMode.p3 || '';
+        manualPrioField3.style.display = manualPriorityInput2.value.trim() ? '' : 'none';
+      }
+      orderModeDateKey = dateKey;
     }
 
     const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
