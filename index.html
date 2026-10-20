@@ -354,6 +354,13 @@
   .stop.has-owner .stampnum{border-color:var(--owner); border-style:solid; color:var(--owner);}
   .tag.owner{background:var(--owner); color:#fff; font-weight:800; padding:4px 10px; box-shadow:0 1px 3px rgba(184,134,11,.35);}
   .tag.manual{background:#E4E9FF; color:#3B4FCC;}
+  /* 부산·경남 밖으로 좌표가 잡힌 방문지 경고 */
+  .stop.out-area{border-color:var(--danger); box-shadow:0 0 0 2px #F6CFC5, var(--shadow);}
+  .tag.outarea{background:var(--danger); color:#fff; font-weight:800; padding:4px 10px; animation:outareaBlink 1.4s ease-in-out infinite;}
+  @keyframes outareaBlink{0%,100%{opacity:1;} 50%{opacity:.45;}}
+  @media (prefers-reduced-motion: reduce){ .tag.outarea{animation:none;} }
+  .outarea-bar{margin:0 16px 10px; background:#FDEDE9; border:1px solid #F1C4B8; color:var(--danger); border-radius:10px; padding:9px 12px; font-size:12.5px; line-height:1.5;}
+  .outarea-bar b{font-weight:800;}
   .routestrip .node.owner-node{color:#FFD166; font-weight:800;}
   .routestrip .node.dim{color:#8B93A0; font-weight:600; font-style:italic;}
   .tag.count{background:var(--bg); color:var(--ink-soft);}
@@ -1056,6 +1063,10 @@
   }
   let kakaoSdkPromise = null; // caches the loaded Maps SDK so we only inject the script once
   const naviGeocodeCache = new Map(); // address -> {lat,lng} | null, avoids re-hitting the API on repeat taps
+  // address -> 지역 판정 결과 {inArea, label, fullName} (null = 판정 불가).
+  // 검사관 배정은 녹산·다대·사상·미음·지사·김해·양산 등 부산·경남 권역 기준이라,
+  // 주소 오류로 좌표가 대구·경북·서울 등 다른 시·도에 잡히면 카드에 경고를 띄운다.
+  const addressRegionCache = new Map();
 
   // ---------- toast ----------
   let toastTimer = null;
@@ -2302,7 +2313,8 @@
       if(res.ok){
         const data = await res.json();
         if(data.documents && data.documents.length){
-          return {lat: parseFloat(data.documents[0].y), lng: parseFloat(data.documents[0].x)};
+          const d0 = data.documents[0];
+          return {lat: parseFloat(d0.y), lng: parseFloat(d0.x), region: d0.address_name || d0.road_address_name || ''};
         }
       }
     }catch(e){ /* network/CORS failure -> treat as not found */ }
@@ -2359,6 +2371,66 @@
       }
     }catch(e){ /* network/CORS failure -> treat as not found */ }
     return null;
+  }
+
+  // ---------- 서비스 권역(부산·경남) 이탈 감지 ----------
+  // 허용 권역을 바꾸려면 이 배열만 수정 (예: 울산 추가 시 '울산').
+  const SERVICE_AREA_PROVINCES = ['부산', '경남'];
+  // 시·도 이름(카카오 표기/정식 명칭)을 짧은 이름으로 통일
+  const PROVINCE_ALIASES = [
+    [/^(부산|부산광역시)$/, '부산'], [/^(경남|경상남도)$/, '경남'], [/^(울산|울산광역시)$/, '울산'],
+    [/^(대구|대구광역시)$/, '대구'], [/^(경북|경상북도)$/, '경북'], [/^(서울|서울특별시)$/, '서울'],
+    [/^(인천|인천광역시)$/, '인천'], [/^(광주|광주광역시)$/, '광주'], [/^(대전|대전광역시)$/, '대전'],
+    [/^(세종|세종특별자치시)$/, '세종'], [/^(경기|경기도)$/, '경기'], [/^(강원|강원도|강원특별자치도)$/, '강원'],
+    [/^(충북|충청북도)$/, '충북'], [/^(충남|충청남도)$/, '충남'], [/^(전북|전라북도|전북특별자치도)$/, '전북'],
+    [/^(전남|전라남도)$/, '전남'], [/^(제주|제주도|제주특별자치도)$/, '제주']
+  ];
+  function normProvince(token){
+    const t = String(token||'').trim();
+    for(const [re, name] of PROVINCE_ALIASES){ if(re.test(t)) return name; }
+    return '';
+  }
+  // 좌표가 어느 시·도인지 판정. 카카오 검색 결과의 주소(첫 단어=시·도)를 우선
+  // 쓰고, 없으면(Nominatim 결과·위도경도 직접 입력) 카카오 좌표→행정구역 API로 확인.
+  const coordRegionCache = new Map();
+  async function classifyCoord(key, coord){
+    if(!coord) return null;
+    let fullName = coord.region || '';
+    let prov = normProvince(fullName.split(/\s+/)[0]);
+    if(!prov && key){
+      const ck = coord.lat.toFixed(4) + ',' + coord.lng.toFixed(4);
+      if(coordRegionCache.has(ck)){
+        fullName = coordRegionCache.get(ck);
+      }else{
+        try{
+          const res = await fetch('https://dapi.kakao.com/v2/local/geo/coord2regioncode.json?x=' + coord.lng + '&y=' + coord.lat, {
+            headers: {Authorization: 'KakaoAK ' + key}
+          });
+          if(res.ok){
+            const data = await res.json();
+            const doc = (data.documents||[]).find(d => d.region_type === 'B') || (data.documents||[])[0];
+            if(doc) fullName = doc.address_name || [doc.region_1depth_name, doc.region_2depth_name].filter(Boolean).join(' ');
+          }
+        }catch(e){ /* 판정 실패 -> 경고 없이 넘어감 */ }
+        coordRegionCache.set(ck, fullName);
+      }
+      prov = normProvince(String(fullName).split(/\s+/)[0]);
+    }
+    if(!prov){
+      // 바다 위 좌표 등 행정구역이 안 잡히는 경우: 한반도 밖이면 이탈로 본다
+      const inKorea = coord.lat > 33 && coord.lat < 38.7 && coord.lng > 124.5 && coord.lng < 131;
+      return inKorea ? null : {inArea: false, label: '국외/알 수 없음', fullName: coord.lat.toFixed(4) + ',' + coord.lng.toFixed(4)};
+    }
+    return {inArea: SERVICE_AREA_PROVINCES.includes(prov), label: prov, fullName: fullName};
+  }
+  async function checkAddressRegion(key, address, coord){
+    const info = await classifyCoord(key, coord);
+    addressRegionCache.set(address, info);
+    return info;
+  }
+  function outOfAreaInfo(address){
+    const info = addressRegionCache.get(address);
+    return (info && !info.inArea) ? info : null;
   }
 
   function haversineKm(a, b){
@@ -2552,6 +2624,13 @@
     const usable = coords.filter(c => c.coord);
     const failed = coords.filter(c => !c.coord);
 
+    // 부산·경남 밖으로 잡힌 방문지 찾기 (카드 경고 + 상태줄 알림)
+    const outOfArea = [];
+    for(const c of usable){
+      const info = await checkAddressRegion(key, effectiveAddressFor(c.group), c.coord);
+      if(info && !info.inArea) outOfArea.push({group: c.group, info});
+    }
+
     // current is captured by nearestChain and advanced as each stop is chosen,
     // so calling it twice in sequence (owner-first mode) naturally continues
     // the route from wherever the previous chain left off.
@@ -2638,10 +2717,14 @@
     setRouteStatus(
       '동선 정렬 완료' + (orderMode === 'ownerFirst' ? ' (⭐ 선주입회 먼저 방문)' : orderMode === 'manual' ? ' (🔢 지정 업체 먼저 방문)' : '')
       + (failed.length ? ` · 주소 인식 실패 ${failed.length}건은 마지막에 배치됨 (${failed.map(f=>f.group.customer).join(', ')})` : '')
+      + (outOfArea.length ? ` · ⚠️ 부산·경남 밖으로 인식된 주소 ${outOfArea.length}건: ${outOfArea.map(o=>o.group.customer + '(' + o.info.label + ')').join(', ')} — 주소를 확인해 주세요` : '')
       + (jsKey ? '' : ' · 지도를 보려면 JavaScript 키도 입력해 주세요'),
-      'ok'
+      outOfArea.length ? 'warn' : 'ok'
     );
     render();
+    if(outOfArea.length){
+      showToast('⚠️ 부산·경남 밖으로 잡힌 방문지 ' + outOfArea.length + '곳 — 빨간 카드의 주소를 확인해 주세요');
+    }
 
     if(jsKey){
       const coordByGroup = new Map(coords.map(c => [c.group, c.coord]));
@@ -2703,6 +2786,22 @@
     };
   }
 
+  // 주소를 수정한 직후 새 주소로 다시 좌표를 잡아 권역 경고를 갱신
+  async function recheckRegionForAddress(address){
+    const key = kakaoKeyInput.value.trim();
+    if(!key || !address) return;
+    let coord = parseLatLngOverride(address);
+    if(!coord){
+      try{ coord = await geocodeAddress(key, address); }catch(e){ coord = null; }
+      naviGeocodeCache.set(address, coord);
+    }
+    if(!coord) return;
+    const info = await checkAddressRegion(key, address, coord);
+    render();
+    if(info && !info.inArea) showToast('⚠️ 수정한 주소도 [' + info.label + '] 지역으로 인식됩니다');
+    else if(info) showToast('✅ ' + info.label + ' 지역 주소로 확인되었습니다');
+  }
+
   async function openRoute(name, address, btn){
     const key = kakaoKeyInput.value.trim();
     let coord = parseLatLngOverride(address);
@@ -2728,6 +2827,23 @@
       }
       window.open(kakaoMapLink(address), '_blank', 'noopener');
       return;
+    }
+
+    // 좌표가 부산·경남 밖이면 길안내 전에 한 번 더 확인
+    let regionInfo = addressRegionCache.has(address) ? addressRegionCache.get(address) : undefined;
+    if(regionInfo === undefined){
+      regionInfo = await checkAddressRegion(key, address, coord);
+      render();
+    }
+    if(regionInfo && !regionInfo.inArea){
+      const go = window.confirm(
+        '⚠️ 이 주소가 부산·경남이 아닌 [' + regionInfo.label + '] 지역으로 인식되었습니다.\n\n' +
+        (name ? '방문지: ' + name + '\n' : '') +
+        '입력 주소: ' + address + '\n' +
+        '인식된 위치: ' + (regionInfo.fullName || regionInfo.label) + '\n\n' +
+        '주소 오류일 가능성이 높습니다. ✏️ 주소 수정으로 바로잡는 것을 권장합니다.\n그래도 이 위치로 길안내를 시작할까요?'
+      );
+      if(!go) return;
     }
 
     const urls = kakaoRouteSchemeUrls(coord);
@@ -2833,8 +2949,10 @@
         overrides[key] = next.trim();
         saveAddressOverrides(overrides);
         naviGeocodeCache.delete(next.trim());
+        addressRegionCache.delete(next.trim());
         render();
         pushAddressOverridesToGist();
+        recheckRegionForAddress(next.trim());
       }
       return;
     }
@@ -3255,6 +3373,7 @@
     const locTag = (g.location && g.location.toLowerCase() !== 'remote' && !g.isManual) ? g.location : '';
     const gKey = groupKey(g);
     const isDone = completedKeys.has(gKey);
+    const outArea = g.remote ? null : outOfAreaInfo(addressForMap);
 
     // Once 검사 완료(✅) is toggled on, the card only needs to keep showing
     // items with an active exception -- i.e. one that's been 🗑️ 삭제 in
@@ -3279,6 +3398,7 @@
             ${locTag ? `<span class="tag count">${esc(locTag)}</span>` : ''}
             ${g.items.length>1 ? `<span class="tag count">${g.items.length}건</span>` : ''}
             ${ownerCount>0 ? '<span class="tag owner">⭐ 선주입회</span>' : ''}
+            ${outArea ? `<span class="tag outarea">⚠️ 지역 확인: ${esc(outArea.label)}</span>` : ''}
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
@@ -3286,6 +3406,10 @@
           ${g.isManual ? `<button type="button" class="donebtn" data-delete-manual-key="${esc(g.manualId)}" style="color:var(--danger); border-color:#F1C4B8;" ${currentDateFinalized ? 'disabled' : ''}>🗑️ 삭제</button>` : ''}
         </div>
       </div>`;
+
+    const outAreaBar = (outArea && !isDone) ? `
+      <div class="outarea-bar">⚠️ 이 주소가 부산·경남이 아닌 <b>${esc(outArea.label)}</b>(으)로 인식되었습니다${locTag ? ` (배정 지역: <b>${esc(locTag)}</b>)` : ''}.<br>
+      인식 위치: ${esc(outArea.fullName || outArea.label)} · 주소 오류일 수 있으니 ✏️ 주소 수정으로 확인해 주세요.</div>` : '';
 
     let actions = '';
     if(!g.remote){
@@ -3370,7 +3494,7 @@
       <div class="add-group-item-row">
         <button type="button" class="smallbtn" data-add-group-item-key="${esc(computeGroupMatchKey(g.customer, g.address || g.location))}" data-add-group-item-customer="${esc(g.customer)}" data-add-group-item-address="${esc(g.address || '')}" data-add-group-item-location="${esc(g.location || '')}">➕ 항목 추가</button>
       </div>` : '';
-    return `<div class="stop${remoteClass}${ownerClass}${doneClass}">${head}${addressLine}${actionRow}${nothingEditedNote}${itemsBlock}${addItemRow}</div>`;
+    return `<div class="stop${remoteClass}${ownerClass}${doneClass}${outArea ? ' out-area' : ''}">${head}${outAreaBar}${addressLine}${actionRow}${nothingEditedNote}${itemsBlock}${addItemRow}</div>`;
   }
 
   function render(){
