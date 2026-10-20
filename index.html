@@ -2488,7 +2488,7 @@
     let parsed;
     try{ parsed = parseWorkbook(lastWorkbookRows); }
     catch(e){ setRouteStatus(e.message, 'warn'); return false; }
-    const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
+    const mine = parsed.items.filter(it => isAssignedTo(it, code));
     const allOnsite = buildOnsiteAndRemoteGroups(mine, code).onsite;
 
     const orderModeEl = document.querySelector('input[name="orderMode"]:checked');
@@ -2990,6 +2990,18 @@
     return map;
   }
 
+  // A single SURVEYOR cell can hold more than one 검사관코드 -- e.g. "HCH/JTL"
+  // when a new inspector is paired with a senior one. That item must show up
+  // for EVERY code listed, so split on "/" (and the full-width "／", ",", "&",
+  // "+") and match each code individually instead of comparing the raw cell.
+  function surveyorCodes(raw){
+    return String(raw||'').toUpperCase().split(/[／\/,&+]/).map(t=>t.trim()).filter(Boolean);
+  }
+  function isAssignedTo(item, code){
+    if(!item || !code) return false;
+    return surveyorCodes(item.surveyor).includes(String(code).trim().toUpperCase());
+  }
+
   function parseWorkbook(rows){
     let idx = null;
     let dayText = '', dateText = '';
@@ -3417,7 +3429,7 @@
       orderModeDateKey = dateKey;
     }
 
-    const mine = parsed.items.filter(it => it.surveyor.toUpperCase() === code);
+    const mine = parsed.items.filter(it => isAssignedTo(it, code));
 
     // Workbook's bottom summary line for this code (e.g. "ES", "A/Leave") --
     // shown even when there are zero MEC items today, since ES/선박검사 or
