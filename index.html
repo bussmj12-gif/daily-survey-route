@@ -3027,7 +3027,7 @@
       if(!idx) continue; // haven't seen a header yet (or malformed sheet)
 
       const survRaw = idx.surveyor > -1 ? cleanCell(row[idx.surveyor]) : '';
-      if(!/^[A-Za-z]{2,6}$/.test(survRaw)) continue; // filters blank rows & footer summary text
+      if(!/^[A-Za-z]{2,6}(?:\s*[／\/,&+]\s*[A-Za-z]{2,6})*$/.test(survRaw)) continue; // filters blank rows & footer summary text; also accepts 공동 배정 like "HCH/JTL"
 
       out.push({
         id: idx.id>-1 ? cleanCell(row[idx.id]) : '',
