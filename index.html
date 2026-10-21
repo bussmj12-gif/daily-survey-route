@@ -1088,14 +1088,22 @@
       codeInput.value = localStorage.getItem(LS_SURVEYOR_CODE) || '';
     }catch(e){ /* localStorage unavailable, sync tab still usable manually */ }
   }
+  // 토큰 칸에 동기화 코드 전체("ghp_xxx::gistId")를 붙여넣는 실수가 잦아서
+  // (→ GitHub 401), 토큰은 항상 "::" 앞부분만, Gist ID는 마지막 부분만 쓰도록 정리.
+  function cleanToken(t){ return String(t||'').split('::')[0].replace(/\s+/g,''); }
+  function cleanGistId(g){ const parts = String(g||'').split('::'); return parts[parts.length-1].replace(/\s+/g,''); }
   function saveDeviceConfig(token, gistId){
+    token = cleanToken(token); gistId = cleanGistId(gistId);
     try{
       localStorage.setItem(LS_TOKEN, token || '');
       localStorage.setItem(LS_GIST, gistId || '');
     }catch(e){}
   }
   function getDeviceConfig(){
-    return {token: tokenInput.value.trim(), gistId: gistInput.value.trim()};
+    const token = cleanToken(tokenInput.value), gistId = cleanGistId(gistInput.value);
+    if(tokenInput.value !== token) tokenInput.value = token;
+    if(gistInput.value !== gistId) gistInput.value = gistId;
+    return {token, gistId};
   }
 
   function setSyncStatus(text, kind){
@@ -1452,7 +1460,8 @@
   }
 
   createGistBtn.addEventListener('click', async function(){
-    const token = tokenInput.value.trim();
+    const token = cleanToken(tokenInput.value);
+    tokenInput.value = token;
     if(!token){
       setSyncStatus('먼저 GitHub 토큰을 입력해 주세요', 'warn');
       return;
@@ -1485,7 +1494,10 @@
 
   applyPasteBtn.addEventListener('click', async function(){
     const raw = pasteInput.value.trim();
-    const parts = raw.split('::');
+    // 토큰::GistID 가 정상이지만, 잘못 만들어진 "토큰::GistID::GistID" 코드도
+    // 첫 부분=토큰, 마지막 부분=Gist ID 로 받아준다.
+    const parts = raw.replace(/\s+/g,'').split('::').filter(Boolean);
+    if(parts.length >= 2){ parts.splice(1, parts.length - 2); }
     if(parts.length !== 2 || !parts[0] || !parts[1]){
       setSyncStatus('동기화 코드 형식이 올바르지 않습니다', 'warn');
       return;
